@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanbeige-mlx-eval"
+version = "0.1.0"
+description = "Nanbeige4.2-3B MLX Evaluation Harness – a faithful MLX port of the Nanbeige Looped Transformer and an agentic-readiness eval on Apple Silicon"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Jishnu Venugopal" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "mlx==0.32.0",
+    "mlx-lm==0.31.3",
+    "transformers==5.14.1",
+    "huggingface_hub==1.24.0",
+    "numpy==2.5.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "jsonschema==4.26.0",
+]
+
+[project.scripts]
+nanbeige-mlx-eval = "nanbeige_mlx_eval.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["nanbeige_mlx_eval*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

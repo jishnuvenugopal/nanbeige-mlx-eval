@@ -1,0 +1,83 @@
+{
+  "suite": "agentic_en",
+  "description": "English agentic / tool-use readiness. Each case offers one or more tools and a natural-language request; the model must select the correct tool and emit a well-formed <tool_call> with the right arguments. Args are chosen to be deterministic (city names, emails, ISO dates, IANA timezones) so grading is fair. max_tokens is generous because Nanbeige4.2-3B reasons before emitting the call.",
+  "language": "en",
+  "category": "tool_use",
+  "cases": [
+    {
+      "id": "en-tc-weather-tokyo",
+      "prompt": "What's the weather in Tokyo right now?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "City name"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "Tokyo"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-weather-paris-select",
+      "prompt": "Will I need an umbrella in Paris today?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "City name"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "Paris"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-email-alice",
+      "prompt": "Email alice@example.com with the subject 'Project update'.",
+      "tools": [
+        {"type": "function", "function": {"name": "send_email", "description": "Send an email.", "parameters": {"type": "object", "properties": {"to": {"type": "string", "description": "Recipient email"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "subject"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "send_email", "args": {"to": "alice@example.com"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-translate-french",
+      "prompt": "Translate the phrase 'good morning' into French.",
+      "tools": [
+        {"type": "function", "function": {"name": "translate", "description": "Translate text into a target language.", "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "target_language": {"type": "string"}}, "required": ["text", "target_language"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "translate", "args": {"target_language": "French"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-time-tokyo",
+      "prompt": "What time is it in Tokyo?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a timezone.", "parameters": {"type": "object", "properties": {"timezone": {"type": "string", "description": "IANA timezone, e.g. Asia/Tokyo"}}, "required": ["timezone"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_current_time", "args": {"timezone": "Asia/Tokyo"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-calendar-date",
+      "prompt": "Schedule my dentist appointment for 2026-08-01.",
+      "tools": [
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "Create a calendar event.", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string", "description": "ISO date YYYY-MM-DD"}}, "required": ["title", "date"]}}},
+        {"type": "function", "function": {"name": "send_email", "description": "Send an email.", "parameters": {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}}, "required": ["to", "subject"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "create_calendar_event", "args": {"date": "2026-08-01"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-flight-sf",
+      "prompt": "Book a flight from San Francisco to New York.",
+      "tools": [
+        {"type": "function", "function": {"name": "book_flight", "description": "Book a flight.", "parameters": {"type": "object", "properties": {"origin": {"type": "string", "description": "Departure city"}, "destination": {"type": "string", "description": "Arrival city"}, "date": {"type": "string"}}, "required": ["origin", "destination"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "book_flight", "args": {"origin": "San Francisco"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-json-profile",
+      "prompt": "Return the user profile as a JSON object with two fields: name set to \"Alex\" and age set to 30.",
+      "expect": {"type": "json_schema", "schema": {"type": "object", "required": ["name", "age"], "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}},
+      "max_tokens": 384
+    }
+  ]
+}

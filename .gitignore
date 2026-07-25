@@ -1,0 +1,29 @@
+# private working docs (never committed)
+plan.md
+status.md
+whatisdone.md
+whatisleft.md
+reference/
+
+# venv / python
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.egg-info/
+
+# generated artifacts (never commit)
+benchmark_results/
+.cache/
+.factory/
+huggingface/
+hf_cache/
+model_cache/
+models/
+snapshots/
+*.log
+
+# os
+.DS_Store

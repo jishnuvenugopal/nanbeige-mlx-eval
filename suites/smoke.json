@@ -1,0 +1,41 @@
+{
+  "suite": "smoke",
+  "description": "Harness-readiness smoke suite. One case per grade kind. The mock runtime returns an expectation-shaped response for each, so a fully-passing mock run proves the pipeline (grading, artifacts, reporting) is wired correctly. This is never a capability claim about the real model.",
+  "language": "n/a",
+  "category": "harness_readiness",
+  "cases": [
+    {
+      "id": "smoke-tool-call",
+      "prompt": "What is the weather in Tokyo?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "Get current weather for a location.", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "City name"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "Tokyo"}, "args_match": "subset"},
+      "max_tokens": 64
+    },
+    {
+      "id": "smoke-exact",
+      "prompt": "Reply with exactly the two letters: OK",
+      "expect": {"type": "exact_match", "value": "OK"},
+      "max_tokens": 64
+    },
+    {
+      "id": "smoke-contains",
+      "prompt": "Write a sentence that includes the word banana.",
+      "expect": {"type": "contains", "value": "banana"},
+      "max_tokens": 64
+    },
+    {
+      "id": "smoke-choice",
+      "prompt": "Is 2 + 2 equal to 4? Answer with one word: Yes or No.",
+      "expect": {"type": "choice", "options": ["Yes", "yes"]},
+      "max_tokens": 64
+    },
+    {
+      "id": "smoke-json",
+      "prompt": "Return a JSON object with a single field x set to 1.",
+      "expect": {"type": "json_schema", "schema": {"type": "object", "required": ["x"], "properties": {"x": {"type": "number"}}}},
+      "max_tokens": 64
+    }
+  ]
+}
