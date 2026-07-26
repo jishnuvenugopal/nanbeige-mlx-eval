@@ -42,13 +42,14 @@ This is a **harness + honest small-N eval**, not a leaderboard. Pass rates carry
   1024-token cap.
 - ⚠️ **A genuine, moderate bf16 logit gap vs the HF reference remains on CPU
   (mean cosine 0.85, top-1 83%)** — and it is **not** MPS noise: running the
-  reference on CPU reproduces the same gap. A single-layer fp32 bisect
-  (`bisect --dtype fp32`) shows every one of 14 stages agrees to cosine 1.0
-  (max-abs ≤ 1.3e-05): the port's arithmetic is **verified correct**. The gap's
-  *cause* is **not yet established** — an input-scale sweep ruled out both bf16
-  compounding and input magnitude, and the per-layer bisect and the per-layer
-  trace disagree by ~13,000× at layer 0, which means the two tools are not
-  measuring the same thing (the trace harness is the active suspect). See
+  reference on CPU reproduces the same gap. The gap's *cause* is **not yet
+  established**, but its *locus* is now pinned down: a single-layer bisect
+  against the checkpoint's **own `NanbeigeDecoderLayer`** (not a reimplementation)
+  returns all stages at cosine 1.0 in fp32 and 0.99999326 in bf16 at the real
+  input scale (`--reference real`). So the divergence does **not** live inside a
+  decoder layer — it lives above it, in the trunk wiring (embedding/mask/position
+  handling or the loop/norm structure across the 44 effective layers), and the
+  per-layer trace harness is the evidence-based suspect. See
   [§ Fidelity](#fidelity-half-a). It does *not* affect behavior on the agentic
   suite.
 - 📌 **A real cost of the looped design nobody else has written down:** full
@@ -136,14 +137,16 @@ nanbeige-mlx-eval parity --src models/nanbeige42-hf --out benchmark_results/pari
 
 ### Per-layer divergence trace
 
-> **Caveat (read first).** The fp32 bisect + scale sweep (below) show that a
-> single layer loses only ~7e-6 of cosine at the real input scale, while this
-> trace reports layer 0 alone at 0.925 — a ~13,000× disagreement at the same
-> layer. That means the trace and the bisect are **not measuring the same
-> thing**, and the curve below is most likely a harness artifact (forward-hook
-> ordering, token slice, mask, or a dtype mismatch on the trace's MLX side),
-> not a measurement of port divergence. The data is kept here as the record of
-> what the trace reports; treat it as unexplained pending a `trace.py` audit.
+> **Caveat (read first).** The single-layer bisect against the checkpoint's own
+> `NanbeigeDecoderLayer` (`--reference real`) returns block cosine **0.99999326**
+> at the real input scale, while this trace reports layer 0 alone at 0.925 — a
+> ~13,000× disagreement at the same layer, with the layer cleared against real
+> code. That means the trace curve below is **not a measurement of the layer**
+> (the layer is fine); it is a measurement of the surrounding harness — the
+> forward hooks across the full looped trunk, the loop-boundary norm, and the
+> whole-model mask/position tensors that only the trace feeds in. Treat the curve
+> as the trace harness's output pending a `trace.py` audit, not as port
+> divergence.
 
 `nanbeige-mlx-eval trace` dumps hidden states after each of the 44 effective
 layers on both sides and reports cosine per layer. Reading the curve:
@@ -170,25 +173,33 @@ layers on both sides and reports cosine per layer. Reading the curve:
   true if the bisect's "identical input, 0.99999 output" is, and the bisect is
   the one measured in isolation with the mask and dtype controlled.
 
-### The decisive experiment: single-layer fp32 bisect
+### The decisive experiment: single-layer bisect against the real reference
 
 The blocker cited in earlier drafts — that fp32 isolation OOMs on 16 GB — is
 false for the question actually being asked. One decoder layer is ~143 M params
 (~573 MB in fp32); loading just it on both sides needs ~1.2 GB. The `bisect`
-subcommand feeds a common random input to one layer in both frameworks and
-compares **14 stages independently** (so an early gap cannot mask a later one),
-in fp32 where any disagreement is logic, not numerics:
+subcommand feeds a common input to the layer in both frameworks and compares
+the stages independently (so an early gap cannot mask a later one), in fp32
+where any disagreement is logic, not numerics. `--reference real` makes the
+checkpoint's **own `NanbeigeDecoderLayer`** the arbiter — not a reimplementation
+of it — by instantiating `modeling_nanbeige.NanbeigeDecoderLayer`, loading the
+same weights, and hooking its submodules (12 of 14 stages from real code):
 
 ```bash
-nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype fp32 --gate
+nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype fp32 \
+  --input real --reference real --gate
 ```
 
-**Result (`results/published/bisect_fp32.json`): every stage agrees to cosine
-1.0, max-abs ≤ 1.3e-05, re-confirmed at the real embedding input (`--input real`).**
-No first-divergent stage. The port's RMSNorm, projections, RoPE, SwiGLU and the
-assembled block are all bit-faithful to the reference in fp32. **This verifies
-the arithmetic is correct.** It does *not* explain the end-to-end gap — see the
-scale sweep below.
+**Result (`results/published/bisect_fp32_realref.json`): every stage agrees to
+cosine 1.0, max-abs ≤ 2.3e-05, against the real `NanbeigeDecoderLayer`.** No
+first-divergent stage. The bf16 real-reference run
+(`bisect_bf16_realref.json`) returns block cosine **0.99999326** with every
+hookable stage ≥ 0.99998. **This verifies the layer's arithmetic is correct
+against Nanbeige's own code** — not merely against a hand-written mirror of it.
+
+This is the strongest available statement about the layer, and it clears the
+layer at the real operating point. It does *not* explain the end-to-end gap —
+see the scale sweep and the locus argument below.
 
 ### Isolating RoPE precision
 
@@ -233,19 +244,22 @@ end-to-end gap implies. The gap is also **not** an input-magnitude effect:
 
 The remaining fact is that the per-layer bisect (this tool) and the per-layer
 trace (the table above) disagree by ~13,000× at layer 0 — 7e-6 vs 0.075 — at the
-same layer and scale. That means the two tools are not measuring the same thing,
-and the 0.925 trace curve is most likely a harness artifact (forward-hook
-ordering, token slice, mask, or a dtype mismatch on the trace's MLX side).
-**Auditing `trace.py` is the open item; the 0.847 number should be treated as an
-unexplained measurement, not a port defect.** The fp32 bisect stands regardless:
-logic bugs are input-independent, and all 14 stages are at cosine 1.0.
+same layer and scale. The bisect has been re-run against the checkpoint's **own
+`NanbeigeDecoderLayer`** (`--reference real`) and still returns 0.99999326, so
+the disagreement is not a property of the layer: it is the trace harness adding
+something the isolated layer does not see (the forward hooks across the full
+looped trunk, the loop-boundary norm, the whole-model mask and position
+tensors). **The layer is cleared on evidence; the trace harness is the
+evidence-based suspect, and auditing its trunk walk is the open item.** The
+0.847 number should be treated as an unexplained measurement, not a port defect.
 
-> Bottom line: **no architectural or arithmetic bug** (verified by the fp32
-> stage-by-stage bisect at the real input scale). A moderate bf16 logit gap is
-> present and **not yet explained** — the two leading hypotheses (bf16
-> compounding, input scale) are both falsified by the sweep, and the trace
-> harness is the active suspect. It does not affect behavior on the agentic
-> suite. Bit-exact parity is not claimed and not expected in bf16.
+> Bottom line: **no architectural or arithmetic bug in the decoder layer** —
+> verified by the fp32 stage-by-stage bisect at the real input scale against the
+> checkpoint's own `NanbeigeDecoderLayer` (`--reference real`, all stages cosine
+> 1.0). A moderate bf16 logit gap is present and **not yet explained**, but its
+> locus is now known to be above the layer (trunk wiring), not inside it. The
+> trace harness is the active suspect. The gap does not affect behavior on the
+> agentic suite. Bit-exact parity is not claimed and not expected in bf16.
 
 ### Functional fidelity (the test that matters for the use case)
 

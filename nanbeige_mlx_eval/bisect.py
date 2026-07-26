@@ -174,7 +174,172 @@ def load_layer_mlx(src: Path, layer_idx: int, dtype: str) -> dict[str, mx.array]
 
 
 # --------------------------------------------------------------------------
-# reference stages (torch), mirroring modeling_nanbeige.NanbeigeAttention
+# reference stages, mode 'real': the ACTUAL NanbeigeDecoderLayer
+# --------------------------------------------------------------------------
+#
+# Why this mode exists
+# --------------------
+# ``_torch_stages`` below is a *reimplementation* of the reference layer. A
+# bisect against it answers "does the MLX port agree with my mirror?", not
+# "does the MLX port agree with Nanbeige's code?" -- any behaviour the real
+# layer has that the mirror also lacks is invisible to it, by construction.
+#
+# That distinction turned out to matter. Two independent measurements against
+# the real HF model (trace: layer-0 cosine 0.925; parity: final-logit cosine
+# 0.847) disagree with the mirror-based bisect (~0.99999) by four orders of
+# magnitude. When one measurement is the odd one out and it is also the only
+# one not using the reference implementation, that measurement is the suspect.
+#
+# This mode instantiates ``modeling_nanbeige.NanbeigeDecoderLayer`` directly,
+# loads the same weights, and hooks its submodules. It is the arbiter:
+#
+#   real-layer vs MLX ~= 0.925  -> the divergence is genuine and lives in the
+#                                  layer; diff the mirror against the real
+#                                  layer stage-by-stage to localise it.
+#   real-layer vs MLX ~= 0.99999 -> the layer is fine against real code, and
+#                                  the gap only appears in the full-model path
+#                                  (embedding, mask, positions, loop/norm
+#                                  structure) -- which trace exercises and a
+#                                  single-layer bisect does not.
+
+_HOOK_STAGES = {
+    "input_layernorm": ("input_layernorm", "out"),
+    "q_proj": ("self_attn.q_proj", "out"),
+    "k_proj": ("self_attn.k_proj", "out"),
+    "v_proj": ("self_attn.v_proj", "out"),
+    "attn_out": ("self_attn.o_proj", "in"),      # o_proj's input == attn output
+    "o_proj": ("self_attn.o_proj", "out"),
+    "post_attention_layernorm": ("post_attention_layernorm", "out"),
+    "gate_proj": ("mlp.gate_proj", "out"),
+    "up_proj": ("mlp.up_proj", "out"),
+    "swiglu": ("mlp.down_proj", "in"),           # down_proj's input == swiglu
+    "down_proj": ("mlp.down_proj", "out"),
+}
+
+
+def _load_reference_module(src: Path):
+    """Import the checkpoint's own modeling_nanbeige.py (no HF model load).
+
+    The remote-code files use package-relative imports (``from .configuration_nanbeige
+    import NanbeigeConfig``), so they must be loaded under a synthetic package
+    rather than as standalone modules -- otherwise the relative import fails with
+    "attempted relative import with no known parent package".
+    """
+    import importlib.util
+    import sys
+    import types
+
+    for cand in (src, Path("reference")):
+        mod_path = cand / "modeling_nanbeige.py"
+        cfg_path = cand / "configuration_nanbeige.py"
+        if not mod_path.exists():
+            continue
+
+        pkg_name = "_nanbeige_refcode"
+        if pkg_name not in sys.modules:
+            pkg = types.ModuleType(pkg_name)
+            pkg.__path__ = [str(cand.resolve())]
+            sys.modules[pkg_name] = pkg
+        else:
+            pkg = sys.modules[pkg_name]
+
+        # load configuration_nanbeige first so modeling_nanbeige's relative import resolves
+        if cfg_path.exists():
+            spec_cfg = importlib.util.spec_from_file_location(
+                f"{pkg_name}.configuration_nanbeige", cfg_path
+            )
+            mod_cfg = importlib.util.module_from_spec(spec_cfg)
+            sys.modules[f"{pkg_name}.configuration_nanbeige"] = mod_cfg
+            spec_cfg.loader.exec_module(mod_cfg)
+
+        spec = importlib.util.spec_from_file_location(
+            f"{pkg_name}.modeling_nanbeige", mod_path
+        )
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[f"{pkg_name}.modeling_nanbeige"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    raise FileNotFoundError(
+        f"modeling_nanbeige.py not found in {src} or ./reference — "
+        "--reference real needs the checkpoint's remote-code files."
+    )
+
+
+def _real_layer_stages(w, cfg: dict, x, dtype: str, layer_idx: int, src: Path):
+    """Run the genuine NanbeigeDecoderLayer and capture its submodule outputs.
+
+    Convention: **a differential test must compare against the artifact under
+    dispute.** If the reference side is code you wrote (a "mirror"), the test
+    can only find bugs you didn't also make in the mirror -- a shared misreading
+    of the source propagates into both sides and cancels. This is why
+    ``--reference real`` exists: it makes the checkpoint's own layer the arbiter
+    rather than ``_torch_stages`` (a reimplementation). Record which side was
+    used in every report (see the ``reference`` / ``reference_note`` fields).
+    """
+    import torch
+    from transformers import AutoConfig  # type: ignore
+
+    mod = _load_reference_module(src)
+    cfg_obj = AutoConfig.from_pretrained(str(src), trust_remote_code=True)
+    cfg_obj.rope_scaling = None          # same reason as parity.py / trace.py
+    cfg_obj._attn_implementation = "eager"
+
+    td = torch.float32 if dtype == "fp32" else torch.bfloat16
+    layer = mod.NanbeigeDecoderLayer(cfg_obj, layer_idx).to(td).eval()
+    missing, unexpected = layer.load_state_dict(
+        {k: v.to(td) for k, v in w.items()}, strict=False
+    )
+    real_missing = [k for k in missing if "rotary_emb" not in k]
+    if real_missing or unexpected:
+        raise RuntimeError(
+            f"real-layer weight load mismatch: missing={real_missing} "
+            f"unexpected={list(unexpected)}"
+        )
+
+    caught: dict[str, Any] = {}
+
+    def mk(name, which):
+        def hook(_m, inp, out):
+            t = inp[0] if which == "in" else (out[0] if isinstance(out, tuple) else out)
+            caught[name] = t.detach().float()
+        return hook
+
+    handles = []
+    for stage, (path, which) in _HOOK_STAGES.items():
+        target = layer
+        for part in path.split("."):
+            target = getattr(target, part)
+        handles.append(target.register_forward_hook(mk(stage, which)))
+
+    B, L, _ = x.shape
+    neg = torch.finfo(td).min
+    causal = torch.full((L, L), neg, dtype=td).triu(1)[None, None]
+    pos = torch.arange(L)[None]
+    try:
+        with torch.no_grad():
+            out = layer(
+                hidden_states=x.to(td),
+                attention_mask=causal,
+                position_ids=pos,
+                past_key_value=None,
+                output_attentions=False,
+                use_cache=False,
+                cache_position=torch.arange(L),
+            )
+    finally:
+        for h in handles:
+            h.remove()
+
+    caught["block"] = (out[0] if isinstance(out, tuple) else out).detach().float()
+    return caught
+
+
+# --------------------------------------------------------------------------
+# reference stages (torch), REIMPLEMENTING modeling_nanbeige.NanbeigeAttention
+#
+# NOTE: this is a mirror, not the reference. See the comment above
+# `_real_layer_stages` for why that distinction is load-bearing. Prefer
+# `--reference real` for any claim about agreement with Nanbeige's code.
 # --------------------------------------------------------------------------
 
 def _torch_stages(w, cfg: dict, x, dtype: str, bf16_rope: bool):
@@ -401,6 +566,7 @@ def run_bisect(
     input_mode: str = "real",
     target_rms: float | None = None,
     prompt: str | None = None,
+    reference: str = "real",
 ) -> dict[str, Any]:
     """Compare one decoder layer stage-by-stage between the port and the reference.
 
@@ -431,8 +597,13 @@ def run_bisect(
 
     tw = load_layer_torch(src, layer_idx, dtype)
     tx = torch.from_numpy(x_np).to(torch.float32 if dtype == "fp32" else torch.bfloat16)
-    ts = _torch_stages(tw, cfg, tx, dtype, bf16_rope)
-    ts = {k: v.detach().float() for k, v in ts.items()}
+    if reference == "real":
+        if bf16_rope:
+            raise ValueError("--bf16-rope only applies to --reference mirror")
+        ts = _real_layer_stages(tw, cfg, tx, dtype, layer_idx, src)
+    else:
+        ts = _torch_stages(tw, cfg, tx, dtype, bf16_rope)
+        ts = {k: v.detach().float() for k, v in ts.items()}
     del tw
 
     mw = load_layer_mlx(src, layer_idx, dtype)
@@ -458,6 +629,13 @@ def run_bisect(
         "seq_len": seq_len,
         "seed": seed,
         "input_mode": input_mode,
+        "reference": reference,
+        "reference_note": (
+            "genuine modeling_nanbeige.NanbeigeDecoderLayer"
+            if reference == "real"
+            else "REIMPLEMENTATION (_torch_stages) — agreement here does NOT "
+                 "establish agreement with Nanbeige's own code"
+        ),
         "input_desc": input_desc,
         "input_rms": round(input_rms, 6),
         "bf16_rope_on_both_sides": bf16_rope,
@@ -511,6 +689,7 @@ def run_scale_sweep(
     seq_len: int = 8,
     seed: int = 0,
     rms_values: list[float] | None = None,
+    reference: str = "real",
     output: str | Path | None = None,
 ) -> dict[str, Any]:
     """Re-run the bisect across input magnitudes; report block cosine vs RMS.
@@ -526,7 +705,7 @@ def run_scale_sweep(
     for r in rms_values:
         rep = run_bisect(
             src_dir, layer_idx=layer_idx, dtype=dtype, seq_len=seq_len,
-            seed=seed, input_mode="scaled", target_rms=r,
+            seed=seed, input_mode="scaled", target_rms=r, reference=reference,
         )
         worst = min(
             (s for s in rep["stages"] if s["stage"] != "block"),
@@ -542,11 +721,13 @@ def run_scale_sweep(
 
     real = run_bisect(
         src_dir, layer_idx=layer_idx, dtype=dtype, seq_len=seq_len,
-        seed=seed, input_mode="real",
+        seed=seed, input_mode="real", reference=reference,
     )
     out = {
         "layer_idx": layer_idx,
         "dtype": dtype,
+        "reference": reference,
+        "reference_note": real["reference_note"],
         "sweep": rows,
         "real_embedding": {
             "input_rms": real["input_rms"],
@@ -583,9 +764,11 @@ def _interpret_sweep(rows: list[dict], real: dict[str, Any]) -> str:
         return base + (
             "Agreement is essentially flat in input scale, so scale does NOT explain "
             "the gap between this bisect (~1e-5) and the trace's layer-0 cosine of "
-            "0.925. The two tools are measuring different things: audit `trace.py` "
-            "(hook ordering, which token is sliced, whether both sides see the same "
-            "mask and dtype) before drawing any conclusion from the trace curve."
+            "0.925. Before blaming trace.py, check WHAT THIS BISECT COMPARED AGAINST: "
+            "if `reference` is 'mirror', it validated the port against a "
+            "reimplementation, not against Nanbeige's code, and cannot rule out a "
+            "real divergence. Re-run with --reference real. Only if the real "
+            "NanbeigeDecoderLayer also agrees at ~1e-5 is trace.py the suspect."
         )
     return base + (
         "Scale dependence is real but does not by itself reach the trace's layer-0 "
@@ -618,7 +801,9 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"# Single-layer bisect — layer {report['layer_idx']}, {report['dtype']}\n\n",
         f"- input: {report.get('input_desc', 'n/a')} "
         f"(rms={report.get('input_rms', 'n/a')})\n",
-        f"- bf16 RoPE emulated on both sides: `{report['bf16_rope_on_both_sides']}`\n",]
+        f"- bf16 RoPE emulated on both sides: `{report['bf16_rope_on_both_sides']}`\n",
+        f"- reference: `{report.get('reference', 'n/a')}` — {report.get('reference_note', '')}\n",
+    ]
     if report.get("WARNING"):
         lines.append(f"\n> **WARNING** {report['WARNING']}\n\n")
     lines += [

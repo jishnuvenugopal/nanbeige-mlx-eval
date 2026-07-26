@@ -105,7 +105,8 @@ def cmd_bisect(args):
     if args.sweep:
         out = run_scale_sweep(
             args.src, layer_idx=args.layer, dtype=args.dtype,
-            seq_len=args.seq_len, seed=args.seed, output=args.out,
+            seq_len=args.seq_len, seed=args.seed, reference=args.reference,
+            output=args.out,
         )
         print(render_sweep_markdown(out))
         return
@@ -120,6 +121,7 @@ def cmd_bisect(args):
         input_mode=args.input,
         target_rms=args.rms,
         prompt=args.prompt,
+        reference=args.reference,
         output=args.out,
     )
     print(render_markdown(r))
@@ -254,6 +256,11 @@ def build_parser() -> argparse.ArgumentParser:
     bi.add_argument("--rms", type=float, default=None,
                     help="target input RMS for --input scaled")
     bi.add_argument("--prompt", default=None, help="prompt for --input real")
+    bi.add_argument("--reference", choices=["real", "mirror"], default="real",
+                    help="what to compare the port against. 'real' instantiates the "
+                         "checkpoint's own NanbeigeDecoderLayer (the arbiter). "
+                         "'mirror' uses _torch_stages, a reimplementation — "
+                         "agreement there does NOT prove agreement with Nanbeige's code.")
     bi.add_argument("--sweep", action="store_true",
                     help="sweep input RMS from 1.0 down to the real embedding scale "
                          "and report block cosine at each -- reconciles bisect vs trace")

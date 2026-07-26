@@ -1,0 +1,114 @@
+{
+  "src": "models/nanbeige42-hf",
+  "layer_idx": 0,
+  "dtype": "bf16",
+  "seq_len": 5,
+  "seed": 0,
+  "input_mode": "real",
+  "reference": "real",
+  "reference_note": "genuine modeling_nanbeige.NanbeigeDecoderLayer",
+  "input_desc": "real embed_tokens(5 tokens), rms=0.02721",
+  "input_rms": 0.027207,
+  "bf16_rope_on_both_sides": false,
+  "first_divergent_stage": null,
+  "block_cosine": 0.99999326,
+  "stages": [
+    {
+      "stage": "input_layernorm",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rel_l2": 0.0,
+      "norm_ref": 43.9506,
+      "verdict": "ok"
+    },
+    {
+      "stage": "q_proj",
+      "cosine": 1.0,
+      "max_abs": 0.007812,
+      "rel_l2": 5.582e-05,
+      "norm_ref": 253.6954,
+      "verdict": "ok"
+    },
+    {
+      "stage": "k_proj",
+      "cosine": 1.0,
+      "max_abs": 1.5e-05,
+      "rel_l2": 9e-08,
+      "norm_ref": 167.1708,
+      "verdict": "ok"
+    },
+    {
+      "stage": "v_proj",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rel_l2": 0.0,
+      "norm_ref": 24.5705,
+      "verdict": "ok"
+    },
+    {
+      "stage": "attn_out",
+      "cosine": 0.99999347,
+      "max_abs": 0.015625,
+      "rel_l2": 0.00362027,
+      "norm_ref": 42.9003,
+      "verdict": "ok"
+    },
+    {
+      "stage": "o_proj",
+      "cosine": 0.9999938,
+      "max_abs": 0.125,
+      "rel_l2": 0.00356401,
+      "norm_ref": 70.4517,
+      "verdict": "ok"
+    },
+    {
+      "stage": "post_attention_layernorm",
+      "cosine": 0.99998826,
+      "max_abs": 0.007812,
+      "rel_l2": 0.00485218,
+      "norm_ref": 26.1471,
+      "verdict": "ok"
+    },
+    {
+      "stage": "gate_proj",
+      "cosine": 0.99999005,
+      "max_abs": 0.03125,
+      "rel_l2": 0.00446655,
+      "norm_ref": 111.7596,
+      "verdict": "ok"
+    },
+    {
+      "stage": "up_proj",
+      "cosine": 0.99998655,
+      "max_abs": 0.015625,
+      "rel_l2": 0.00519306,
+      "norm_ref": 80.9849,
+      "verdict": "ok"
+    },
+    {
+      "stage": "swiglu",
+      "cosine": 0.99997935,
+      "max_abs": 0.03125,
+      "rel_l2": 0.00643339,
+      "norm_ref": 21.7717,
+      "verdict": "ok"
+    },
+    {
+      "stage": "down_proj",
+      "cosine": 0.99998567,
+      "max_abs": 0.03125,
+      "rel_l2": 0.00535479,
+      "norm_ref": 42.5196,
+      "verdict": "ok"
+    },
+    {
+      "stage": "block",
+      "cosine": 0.99999326,
+      "max_abs": 0.125,
+      "rel_l2": 0.0036957,
+      "norm_ref": 92.8181,
+      "verdict": "ok"
+    }
+  ],
+  "interpretation": "Every stage agrees within bf16 tolerance for this layer."
+}

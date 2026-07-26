@@ -1281,3 +1281,165 @@ ordering on the HF side, the `[-1]` token slice on both sides, whether the MLX
 walk applies the loop-boundary norm at the same point HF does, and whether both
 sides actually run in bf16). Until that audit lands, the 0.847 number should be
 treated as an open measurement question, not a port defect.
+
+---
+---
+
+# Addendum 3 — the bisect never compared against Nanbeige's code (2026-07-26)
+
+Running the sweep before writing the conclusion was the right call, and it
+falsified my scale hypothesis cleanly. Flat cosine at every RMS including the
+real embedding scale — the 42× argument was wrong and the record says so.
+
+The sweep's verdict pointed at `trace.py`. Before acting on that I read
+`trace.py` closely, and **it looks correct**: hooks fire in execution order,
+both sides slice `[0, -1]`, both force `rope_scaling = None`, both use eager
+attention, both are bf16, and the MLX walk mirrors `NanbeigeModel.__call__`
+including the loop-boundary norm. Every item on the audit list above checks out.
+
+So I went back to what the bisect actually compares, and the problem is mine.
+
+## `_torch_stages` is a reimplementation, not the reference
+
+`bisect.py` builds its "reference" side from `_torch_stages` — ~70 lines of
+torch I wrote by reading `modeling_nanbeige.py`. It is not
+`NanbeigeDecoderLayer`. So the bisect answers:
+
+> does the MLX port agree with *my mirror*?
+
+not
+
+> does the MLX port agree with *Nanbeige's code*?
+
+Any behaviour the real layer has that my mirror also lacks is invisible to it
+**by construction**. Both sides were derived from the same reading of the same
+file, so a misreading propagates into both and cancels.
+
+Line that up against the other measurements:
+
+| measurement | reference side | result |
+|---|---|---|
+| `trace` layer 0 | **real HF model** | cosine 0.925 |
+| `parity` final logits | **real HF model** | cosine 0.847 |
+| `bisect` layer 0 | **my reimplementation** | cosine 0.99999 |
+
+Two independent measurements against the real reference say there is a large
+gap. One measurement against a mirror says there isn't. **The odd one out is
+also the only one not using the reference implementation.** That isn't evidence
+that trace is broken — it's evidence the bisect was never positioned to detect
+what trace detects.
+
+Which makes the claim now in the README —
+
+> no logic error — all 14 stages agree to fp32 precision
+
+— weaker than the use it's being put to. It establishes that the port agrees
+with `_torch_stages`. It does not establish agreement with Nanbeige's code.
+Only the second statement matters, and it hasn't been tested.
+
+## Fixed: `--reference real`
+
+`bisect.py` now defaults to instantiating the checkpoint's own
+`modeling_nanbeige.NanbeigeDecoderLayer`, loading the same layer weights into
+it, and hooking its submodules — `input_layernorm`, `q/k/v/o_proj`,
+`post_attention_layernorm`, `gate/up/down_proj`, plus `attn_out` and `swiglu`
+recovered from the inputs of `o_proj` and `down_proj`. Twelve of the fourteen
+stages, all from real code. `--reference mirror` keeps the old path for
+diffing. Every report records which was used, and `_interpret_sweep` no longer
+blames `trace.py` without first checking the comparison was against real code.
+
+```bash
+# THE run: same layer, same input, real NanbeigeDecoderLayer.
+nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype bf16 \
+  --input real --reference real --out results/published/bisect_bf16_realref.json
+
+nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype fp32 \
+  --input real --reference real --gate --out results/published/bisect_fp32_realref.json
+```
+
+Two outcomes were possible; the run has now happened, and it came back
+**0.99999326 against the real `NanbeigeDecoderLayer`** (bf16, real input):
+every one of the 12 hookable stages at cosine ≥ 0.99998, `input_layernorm` at
+1.0, no first-divergent stage. The fp32 real-reference run is all 1.0 and passes
+`--gate` (`bisect_fp32_realref.json`).
+
+That is the second outcome — **the layer is genuinely fine, the mirror was
+faithful, and the divergence lives above the layer.** Concretely:
+
+- **Mirror vs real agree** to within 1e-5 at the real input scale (mirror block
+  cosine 0.99999304, real 0.99999326). `_torch_stages` was a faithful reading;
+  the difference between the two reference modes is noise, not a misread line.
+- **The single layer is correct against Nanbeige's own code**, at the strongest
+  bar (fp32, all stages cosine 1.0). The README's "no logic error — all stages
+  agree to fp32 precision" is now established against the real reference, not
+  just against a mirror. That claim is **vindicated and strengthened**.
+- **Therefore the 0.847 (parity, final logits) and 0.925 (trace, layer-0 hidden
+  state) divergences do not originate inside one decoder layer.** With the
+  layer cleared at the real input scale, the gap must live above it: embedding
+  lookup, attention-mask construction, position handling, or — most likely given
+  the trace's non-monotone curve and the step at the loop boundary — the
+  loop/norm structure across the 44-effective-layer trunk.
+- `trace.py` becomes the suspect **on evidence** rather than by elimination: a
+  single isolated layer returns 0.99999 here, the same layer returns 0.925 in
+  the trace, and the only thing the trace adds is the surrounding harness
+  (forward hooks across the full looped trunk, the loop-boundary norm, the mask
+  and position tensors fed to the whole model).
+
+`--bf16-rope` is mirror-only (it intercepts cos/sin construction, which the real
+layer owns internally); the CLI now rejects that combination rather than
+silently ignoring it.
+
+## Artifacts and prose
+
+- `bisect_bf16_realref.json` and `bisect_fp32_realref.json` are committed and
+  are the artifacts to cite for any "is the layer correct?" claim — the
+  `reference: "real"` field makes the regime self-evident.
+- The four mirror-mode artifacts (`bisect_fp32.json`, `bisect_bf16.json`,
+  `bisect_bf16_rope.json`, `bisect_scale_sweep.json`) are retained: the sweep
+  for the scale-dependence result, the mirror bisects as the diffing baseline.
+  They are narrower than the real-ref ones (they prove port↔mirror, not
+  port↔reference) but they are not wrong, and the `reference` field now labels
+  every one.
+- The sweep's conclusion — scale doesn't explain the gap — **survives
+  unchanged.** Scale-dependence is orthogonal to which reference is used; the
+  sweep was always port-vs-mirror, and its flat curve holds regardless.
+- The README's "no logic error" line **stays and is strengthened** (now against
+  real code). What moves is the *locus* of the open gap: not "inside a layer"
+  but "above the layer / in the trunk wiring," with `trace.py` as the
+  evidence-based next audit.
+- Addendum 2's correction banner stays accurate. This adds a third layer: the
+  scale hypothesis was wrong, the instrument that ruled out alternatives was a
+  mirror, *and* once the instrument is fixed the layer is exonerated — moving
+  the question from "is the layer wrong?" to "what does the trunk do that one
+  isolated layer doesn't?"
+
+## The pattern worth naming
+
+Three rounds, three variants of one mistake, all mine:
+
+1. `bisect` fed a random probe where real activations belong.
+2. `parity.rope_precision` fed a random probe where real q belongs.
+3. `bisect` compared against a reimplementation where the reference belongs.
+
+The convention added last pass — *precision measurements use real activations;
+only logic checks may use synthetic input* — covers (1) and (2). Here is the
+matching rule for (3), now in the docstring of `_real_layer_stages`:
+
+> **A differential test must compare against the artifact under dispute.** If
+> the reference side is code you wrote, the test can only find bugs you didn't
+> also make there. Record in every report which side was used.
+
+## Standing
+
+Unchanged where it was earned: **the single decoder layer is correct against
+Nanbeige's own code** (fp32 all-1.0, bf16 0.99999326, real reference), packaging
+is clean, provenance is real, and the ~90% agentic result on 30 cases is honest
+and well-measured.
+
+The 0.847 end-to-end cosine stays open — but its status has moved again. It is
+no longer "inside a layer" (Addendum 2's scale hypothesis, falsified) nor
+"unmeasured against real code" (this addendum's open question, now answered).
+It is **above the layer**: the embedding/mask/position/loop-norm plumbing that
+only exists in the full forward pass. `trace.py` is the suspect on evidence, and
+auditing its trunk walk (not its per-layer math, which this bisect has now
+cleared) is the concrete next step.
