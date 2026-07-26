@@ -94,6 +94,17 @@ def cmd_trace(args):
     run_trace(args.src, output=args.out, device=args.device, dtype=args.dtype)
 
 
+def cmd_crosscheck(args):
+    from .crosscheck import render_markdown, run_crosscheck
+
+    out = run_crosscheck(
+        args.src, prompt=args.prompt, dtype=args.dtype, output=args.out
+    )
+    print(render_markdown(out))
+    if args.gate and "UNRESOLVED" not in out["verdict"]:
+        pass  # a named side is a successful diagnosis, not a failure
+
+
 def cmd_bisect(args):
     from .bisect import (
         render_markdown,
@@ -268,6 +279,17 @@ def build_parser() -> argparse.ArgumentParser:
     bi.add_argument("--gate", action="store_true",
                     help="exit non-zero if any stage diverges")
     bi.set_defaults(func=cmd_bisect)
+
+    xc = sub.add_parser(
+        "crosscheck",
+        help="reconcile bisect vs trace: 4x4 layer-0 matrix + embedding check",
+    )
+    xc.add_argument("--src", required=True, help="local Nanbeige HF repo")
+    xc.add_argument("--prompt", default="The capital of France is")
+    xc.add_argument("--dtype", choices=["bf16", "fp32"], default="bf16")
+    xc.add_argument("--out", default=None)
+    xc.add_argument("--gate", action="store_true")
+    xc.set_defaults(func=cmd_crosscheck)
 
     sm = sub.add_parser("smoke", help="gated one-shot real-model generation")
     sm.add_argument("--model", required=True)

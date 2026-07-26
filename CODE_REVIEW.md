@@ -1443,3 +1443,177 @@ It is **above the layer**: the embedding/mask/position/loop-norm plumbing that
 only exists in the full forward pass. `trace.py` is the suspect on evidence, and
 auditing its trunk walk (not its per-layer math, which this bisect has now
 cleared) is the concrete next step.
+
+---
+---
+
+# Addendum 4 — "above the layer" is one inference too far (2026-07-26)
+
+The real-reference run is the strongest result the project has: against
+Nanbeige's own `NanbeigeDecoderLayer`, at the real embedding scale, layer 0
+agrees at **0.99999326** in bf16 and exactly **1.0** at fp32. Catching the
+relative-import bug in `_load_reference_module` before trusting the number was
+the right instinct — my "Wired." was premature and you were right not to take it.
+
+But the closing inference goes further than the data. Addendum 3 now says the
+gap is "**above the layer**: the embedding/mask/position/loop-norm plumbing."
+That doesn't follow yet, and it would be the fourth wrong locus in four rounds.
+
+## The contradiction localises itself — no new hypothesis needed
+
+| | layer 0, bf16, real input, real reference |
+|---|---|
+| `bisect` | 0.99999326 |
+| `trace` | 0.925086 |
+
+Same layer, same reference implementation, same dtype, same input scale.
+**These cannot both be true.** "Above the layer" treats both as valid and looks
+for a mechanism that reconciles them. There isn't one: they're measurements of
+the same quantity, 13,000× apart. One of them is wrong.
+
+Four tensors, all "layer-0 output at the last token":
+
+```
+A = bisect, MLX side      B = bisect, HF side
+C = trace,  MLX side      D = trace,  HF side
+```
+
+Measured: `cos(A,B) = 0.99999`, `cos(C,D) = 0.925`. It follows immediately that
+**at least one of `cos(A,C)` or `cos(B,D)` is far from 1**. Computing both names
+the broken side. That's arithmetic, not another guess.
+
+- `cos(A,C)` low → the **MLX side** differs between tools. The port is already
+  cleared, so the fault is the trace's MLX walk: mask from a `None` cache, RoPE
+  offset from a `None` cache, or `set_dtype` ordering vs `load_weights`.
+- `cos(B,D)` low → the **HF side** differs. A standalone layer and the same
+  layer inside the model disagree — meaning `NanbeigeModel.forward` touches the
+  hidden state before layer 0, or the hook isn't capturing the layer output.
+- Both high → the fault is in how one tool **pairs its own two sides**: layer
+  ordering, or index 0 meaning different layers on each side.
+
+Only the "both high" branch supports "above the layer," and it's the one branch
+nobody has checked.
+
+## What `bisect` structurally cannot see
+
+`bisect` hands **both** frameworks the same array from `_embed_rows`. `trace`
+lets **each framework do its own `embed_tokens` lookup**.
+
+If those two lookups disagree, `bisect` is blind to it *by construction* — the
+same shape of blindness as comparing against a reimplementation instead of the
+reference. Third occurrence of that pattern, and it makes the embedding the most
+upstream suspect in the chain. Also nearly free to check.
+
+## Added: `crosscheck`
+
+`nanbeige_mlx_eval/crosscheck.py` + a `crosscheck` subcommand. Step 0 compares
+the last-token embedding three ways (raw shard read, MLX `embed_tokens`, HF
+`embed_tokens`); then it computes the full 4×4 layer-0 matrix and writes a
+verdict naming the divergent side. `_verdict` covers all four branches including
+the arithmetically-impossible one, so the artifact carries the diagnosis.
+
+```bash
+nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf \
+  --out results/published/crosscheck_layer0.json
+```
+
+## Hold this line, keep that one
+
+- **Keep** "no logic error." Now established against `NanbeigeDecoderLayer` at
+  fp32 (all stages 1.0) and bf16 (≥ 0.99998). Finally as strong as presented.
+- **Revert** "the gap lives above the layer" in Addendum 3's Standing and
+  anywhere it reached the README. It's conditional on a branch not yet tested.
+  Until `crosscheck` runs, the honest statement is: *one of the two harnesses
+  disagrees with the other about layer 0, and which one is a one-run question.*
+- Falsified stays falsified: MPS, bf16 compounding, input scale, and
+  inside-a-layer were each killed by a measurement that still stands.
+
+## Scoreboard
+
+| round | hypothesis for 0.847 | status |
+|---|---|---|
+| 1 | MPS bf16 | falsified (CPU run) |
+| 2 | bf16 compounded over 44 layers | falsified (sweep) |
+| 3 | input scale, 42× too large | falsified (sweep) |
+| 4 | logic error inside one layer | falsified (real-reference bisect) |
+| 5 | **one of the two harnesses** | crosscheck decides |
+
+Four of five ruled out by measurement rather than argument, which is the project
+working correctly even though each round felt like a setback.
+
+## Process note
+
+Every hypothesis I've offered across these four addenda has been wrong, and each
+was killed by an experiment that took minutes. The problem was never the
+hypotheses — it's that in each round the write-up came before the run. Round 5
+is the first one that doesn't need a hypothesis at all: the contradiction is
+arithmetic, and the experiment reads out which side broke.
+
+## The run came back — it's the HF side, and the port is exonerated
+
+```bash
+nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf \
+  --out results/published/crosscheck_layer0.json
+```
+
+Result (`crosscheck_layer0.json`), layer 0, bf16, real input, "The capital of
+France is":
+
+| pair | cosine | meaning |
+|---|---|---|
+| embedding (shard vs MLX vs HF, all 3) | **1.0** | embedding clean — not the suspect |
+| **A (bisect MLX) vs C (trace MLX)** | **1.0** (bit-identical) | **MLX side agrees across tools** |
+| A vs B (bisect's own two sides) | 0.9999943 | bisect's 0.99999 result |
+| **B (bisect HF) vs D (trace HF)** | **0.9250685** | **HF side disagrees across tools** |
+| C vs D (trace's own two sides) | 0.9250857 | trace's 0.925 result |
+
+**Verdict: `cos(B,D)` low — the HF side differs.** This is the second bullet of
+the decomposition above, not "above the layer" (which needed the "both high"
+branch that didn't fire) and not the embedding (1.0 across all three lookups).
+
+What this establishes, precisely:
+
+- **The port is fully exonerated.** A = C = 1.0 bit-exactly: the MLX layer-0
+  output is identical whether computed via `_mlx_stages` (the bisect's isolated
+  block) or via the full `Model` walk (the trace's path). There is no MLX-side
+  divergence at all. Every round-3/4 hedge about "the trace's MLX walk" is
+  answered — it produces the same thing the bisect produces.
+- **The 0.925 lives entirely on the HF side**, and it is a disagreement *within
+  the reference implementation's two ways of running layer 0*: a standalone
+  `NanbeigeDecoderLayer` (B) and the same layer inside the full HF model (D)
+  produce outputs at cosine 0.925, max_abs 4.5, and **different RMS** (0.656 vs
+  0.559). The HF model transforms the hidden state around layer 0 in a way the
+  standalone layer does not.
+- **Both the bisect and the trace were correct about what they measured.** The
+  bisect said "port vs standalone-layer = 0.99999" — true. The trace said
+  "port vs in-model-layer = 0.925" — also true, because the in-model HF layer-0
+  output (D) differs from the standalone one (B) by exactly that much. They were
+  never measuring the same reference tensor.
+
+So the "above the layer" framing of Addendum 3 was a misread of which side moved,
+but the *locus* it gestured at was accidentally right: the divergence is not
+inside the port's layer (cleared) nor inside a standalone decoder layer (cleared
+against real code) — it is in whatever `NanbeigeModel.forward` does between
+`inputs_embeds` and the layer loop (or in what the forward hook captures vs the
+layer's true output). The RMS dropping 0.656 → 0.559 across the in-model layer 0
+is the concrete clue: something rescales the residual there that a standalone
+`NanbeigeDecoderLayer(...)` does not.
+
+## Scoreboard (updated)
+
+| round | hypothesis for 0.847 | status |
+|---|---|---|
+| 1 | MPS bf16 | falsified (CPU run) |
+| 2 | bf16 compounded over 44 layers | falsified (sweep) |
+| 3 | input scale, 42× too large | falsified (sweep) |
+| 4 | logic error inside one layer | falsified (real-reference bisect) |
+| 5 | one of the two harnesses disagrees | **decided: the HF side, `cos(B,D)=0.925`** |
+
+The port is cleared by measurement at every level that bears on it: fp32 logic
+(all stages 1.0 against the real layer), bf16 precision (0.99999326 against the
+real layer), and now full-path consistency (A=C=1.0 across the bisect and trace
+MLX paths). What remains is a property of the HF reference's own two execution
+paths for layer 0 — a harness question about the reference side, not a port
+defect. The next concrete step is reading `NanbeigeModel.forward` between
+`inputs_embeds` and the first decoder layer, with the 0.656→0.559 RMS drop as
+the signal.

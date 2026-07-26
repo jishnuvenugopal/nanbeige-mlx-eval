@@ -1,0 +1,80 @@
+{
+  "src": "models/nanbeige42-hf",
+  "prompt": "The capital of France is",
+  "n_tokens": 5,
+  "dtype": "bf16",
+  "embedding_agreement": [
+    {
+      "pair": "shard_read vs mlx_lookup",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.024045,
+      "rms_b": 0.024045
+    },
+    {
+      "pair": "shard_read vs hf_lookup",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.024045,
+      "rms_b": 0.024045
+    },
+    {
+      "pair": "mlx_lookup vs hf_lookup",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.024045,
+      "rms_b": 0.024045
+    }
+  ],
+  "layer0_matrix": [
+    {
+      "pair": "A_bisect_mlx vs B_bisect_hf",
+      "cosine": 0.9999943,
+      "max_abs": 0.007812,
+      "rms_a": 0.65607,
+      "rms_b": 0.655962
+    },
+    {
+      "pair": "A_bisect_mlx vs C_trace_mlx",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.65607,
+      "rms_b": 0.65607
+    },
+    {
+      "pair": "A_bisect_mlx vs D_trace_hf",
+      "cosine": 0.92508574,
+      "max_abs": 4.5,
+      "rms_a": 0.65607,
+      "rms_b": 0.559223
+    },
+    {
+      "pair": "B_bisect_hf vs C_trace_mlx",
+      "cosine": 0.9999943,
+      "max_abs": 0.007812,
+      "rms_a": 0.655962,
+      "rms_b": 0.65607
+    },
+    {
+      "pair": "B_bisect_hf vs D_trace_hf",
+      "cosine": 0.92506854,
+      "max_abs": 4.5,
+      "rms_a": 0.655962,
+      "rms_b": 0.559223
+    },
+    {
+      "pair": "C_trace_mlx vs D_trace_hf",
+      "cosine": 0.92508574,
+      "max_abs": 4.5,
+      "rms_a": 0.65607,
+      "rms_b": 0.559223
+    }
+  ],
+  "key_numbers": {
+    "within_bisect_A_vs_B": 0.9999943,
+    "within_trace_C_vs_D": 0.92508574,
+    "across_mlx_A_vs_C": 1.0,
+    "across_hf_B_vs_D": 0.92506854
+  },
+  "verdict": "HF SIDE DIFFERS between the tools (B vs D = 0.92506854). A standalone NanbeigeDecoderLayer and the same layer inside the full model produce different layer-0 output. That means the model-level forward does something to the hidden state before layer 0 that the standalone layer never sees, or the hook captures something other than the layer output. Read NanbeigeModel.forward between `inputs_embeds` and the layer loop, and confirm the hook's `out[0]` is the hidden state."
+}
