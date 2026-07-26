@@ -6,7 +6,7 @@ per physical layer (one per loop) must stay in lockstep; if the loop/slot index
 were ever swapped, the incremental decode would diverge from the one-shot
 prefill and the offsets would drift.
 
-Addresses A2 in CODE_REVIEW.md.
+Addresses A2 in docs/investigation-log.md.
 """
 
 from __future__ import annotations

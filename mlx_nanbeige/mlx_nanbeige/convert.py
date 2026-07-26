@@ -7,7 +7,7 @@ a registry entry. ``auto_map`` is stripped from the *output* config because the
 MLX side loads via ``model_file``; it is left intact in the source so the HF
 parity reference can still load the remote modeling code.
 
-Two correctness properties (P3.3, P3.4 in CODE_REVIEW.md):
+Two correctness properties (P3.3, P3.4 in docs/investigation-log.md):
 
 * **Never mutate the source.** ``prepare_source`` stages a conversion-ready copy
   in a temp dir, symlinks the (large) safetensors shards instead of duplicating

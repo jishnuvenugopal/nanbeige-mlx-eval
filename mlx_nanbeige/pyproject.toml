@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 # Pinned to the mlx-lm internals the shipped model_file depends on
-# (mlx_lm.models.base / .cache; see model.py). C1/C2 in CODE_REVIEW.md.
+# (mlx_lm.models.base / .cache; see model.py). C1/C2 in docs/investigation-log.md.
 dependencies = [
     "mlx>=0.32",
     "mlx-lm>=0.31",

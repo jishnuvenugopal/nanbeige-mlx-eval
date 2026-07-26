@@ -189,6 +189,19 @@ class Attention(nn.Module):
         keys = keys.reshape(B, L, self.n_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
         values = values.reshape(B, L, self.n_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
 
+        # RoPE precision: nothing to do here, and this is a measured result, not
+        # an assumption. `mx.fast.rope` computes its frequencies and cos/sin in
+        # fp32 inside the kernel regardless of the input dtype, so wrapping these
+        # calls in an fp32 upcast/downcast is arithmetically inert. Measured: an
+        # fp32 round-trip around the two calls below left the end-to-end parity
+        # cosine *bit-identical* (0.846566 both ways, 6 prompts, 166k logits).
+        # Bit-identity is only possible if the kernel was already fp32-internal.
+        #
+        # Contrast the HF reference, which is vulnerable here: it holds `inv_freq`
+        # as a non-persistent fp32 buffer, so a blanket `.to(bfloat16)` on the
+        # module silently degrades it (see docs/investigation-log.md and the
+        # comment in nanbeige_mlx_eval/bisect.py::_real_layer_stages). The port
+        # has no such buffer to clobber -- nn.RoPE stores four Python scalars.
         if cache is not None:
             queries = self.rope(queries, offset=cache.offset)
             keys = self.rope(keys, offset=cache.offset)
