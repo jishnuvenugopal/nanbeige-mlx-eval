@@ -53,6 +53,9 @@ def _gather_hf_layer_states(
     """
     import torch  # type: ignore
     from transformers import AutoConfig, AutoModelForCausalLM  # type: ignore
+    from ._hfquiet import quiet_hf
+
+    quiet_hf()
 
     torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float32
 
@@ -146,6 +149,9 @@ def run_trace(
 ) -> dict[str, Any]:
     """Trace per-effective-layer divergence for one prompt; write JSON + markdown."""
     from transformers import AutoTokenizer  # type: ignore
+    from ._hfquiet import quiet_hf
+
+    quiet_hf()
 
     prompts = prompts or ["The capital of France is"]
     src = Path(src_dir)

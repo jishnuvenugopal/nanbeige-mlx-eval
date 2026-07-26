@@ -79,6 +79,9 @@ def _embeddings(src: Path, ids: list[int], dtype: str) -> dict[str, list[float]]
     import mlx.core as mx
     import torch
     from transformers import AutoConfig, AutoModelForCausalLM  # type: ignore
+    from ._hfquiet import quiet_hf
+
+    quiet_hf()
 
     from .bisect import _embed_rows
 
@@ -179,6 +182,9 @@ def run_crosscheck(
     output: str | Path | None = None,
 ) -> dict[str, Any]:
     from transformers import AutoTokenizer  # type: ignore
+    from ._hfquiet import quiet_hf
+
+    quiet_hf()
 
     src = Path(src_dir)
     tok = AutoTokenizer.from_pretrained(str(src), trust_remote_code=True)
@@ -335,6 +341,9 @@ def run_replay(
     """Capture layer 0's real call arguments, replay them standalone, compare."""
     import torch
     from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer  # type: ignore
+    from ._hfquiet import quiet_hf
+
+    quiet_hf()
 
     from .bisect import _real_layer_stages, load_layer_torch
 
@@ -382,7 +391,29 @@ def run_replay(
 
     D = grabbed["D"]
     hs = grabbed["args"][0] if grabbed["args"] else grabbed["kwargs"]["hidden_states"]
-    del model
+
+    # ---- the isolating cell -------------------------------------------------
+    # Replay above changed TWO things at once relative to B: the layer OBJECT
+    # and the ARGUMENTS. So "replay==D and B!=D" does not implicate the
+    # arguments -- it only says at least one of the two matters. Run the same
+    # object with the bisect's HAND-BUILT arguments to separate them.
+    L = hs.shape[1]
+    hand_mask = torch.full((L, L), torch.finfo(td).min, dtype=td).triu(1)[None, None]
+    with torch.no_grad():
+        same_obj_hand_args = layer0(
+            hidden_states=hs.to(td),
+            attention_mask=hand_mask,
+            position_ids=torch.arange(L)[None],
+            past_key_value=None,
+            output_attentions=False,
+            use_cache=False,
+            cache_position=torch.arange(L),
+        )
+    same_obj_hand_args = (
+        same_obj_hand_args[0] if isinstance(same_obj_hand_args, tuple) else same_obj_hand_args
+    ).detach().float()
+
+    inmodel_rope_dtype = str(layer0.self_attn.rotary_emb.inv_freq.dtype)
 
     # Now the standalone layer the bisect builds, given the SAME hidden state.
     cfg = json.loads((src / "config.json").read_text(encoding="utf-8"))
@@ -390,23 +421,37 @@ def run_replay(
     B = _real_layer_stages(tw, cfg, hs.to(td), dtype, 0, src)["block"].detach().float()
     del tw
 
+    # what does the STANDALONE object look like? (the report only ever showed
+    # the in-model one, which is the side that isn't in question)
+    standalone_attn, standalone_rope_dtype = _standalone_object_info(src, dtype)
+
     d = D[0, -1].tolist()
     b = B[0, -1].tolist()
     r = replay_same_obj[0, -1].tolist()
+    h = same_obj_hand_args[0, -1].tolist()
 
     out_d = {
         "src": str(src), "prompt": prompt, "dtype": dtype, "n_tokens": len(ids),
-        "inmodel_attention_class": inmodel_attn,
+        "object_comparison": {
+            "inmodel_attention_class": inmodel_attn,
+            "standalone_attention_class": standalone_attn,
+            "inmodel_rope_inv_freq_dtype": inmodel_rope_dtype,
+            "standalone_rope_inv_freq_dtype": standalone_rope_dtype,
+        },
         "captured_call": {
             "positional": [_describe(a) for a in grabbed["args"]],
             "keyword": {k: _describe(v) for k, v in grabbed["kwargs"].items()},
         },
         "pairs": [
             _pair("D_inmodel", d, "B_standalone", b),
-            _pair("D_inmodel", d, "R_replay_same_object", r),
-            _pair("B_standalone", b, "R_replay_same_object", r),
+            _pair("D_inmodel", d, "R_sameobj_modelargs", r),
+            _pair("D_inmodel", d, "H_sameobj_handargs", h),
+            _pair("B_standalone", b, "H_sameobj_handargs", h),
         ],
-        "verdict": _replay_verdict(_cos(d, r), _cos(d, b), inmodel_attn),
+        "verdict": _replay_verdict(
+            _cos(d, r), _cos(d, b), _cos(d, h), _cos(b, h),
+            inmodel_attn, standalone_attn, inmodel_rope_dtype, standalone_rope_dtype,
+        ),
     }
     if output:
         p = Path(output)
@@ -415,40 +460,88 @@ def run_replay(
     return out_d
 
 
-def _replay_verdict(dr: float, db: float, attn: str) -> str:
-    if dr > 0.9999 and db < 0.999:
-        return (
-            f"ARGUMENTS. Replaying the model's own call arguments into the same layer "
-            f"reproduces D (cos={dr:.6f}), while the bisect's hand-built invocation does "
-            f"not (cos={db:.6f}). So the layer is deterministic and correct; "
-            f"`_real_layer_stages` calls it differently than the model does. Diff "
-            f"`captured_call` against the bisect's invocation (mask construction, "
-            f"cache_position, loop_idx, dtype) -- the differing argument is what the "
-            f"bisect got wrong. CRITICAL: the port matches B, so it very likely shares "
-            f"the same mistake. The bisect's 0.99999 does NOT clear the port."
+def _standalone_object_info(src: Path, dtype: str) -> tuple[str, str]:
+    """Attention class and rope buffer dtype of the layer `_real_layer_stages` builds."""
+    import torch
+    from transformers import AutoConfig  # type: ignore
+    from ._hfquiet import quiet_hf
+
+    quiet_hf()
+
+    from .bisect import _load_reference_module
+
+    mod = _load_reference_module(src)
+    cfg_obj = AutoConfig.from_pretrained(str(src), trust_remote_code=True)
+    cfg_obj.rope_scaling = None
+    cfg_obj._attn_implementation = "eager"
+    td = torch.float32 if dtype == "fp32" else torch.bfloat16
+    layer = mod.NanbeigeDecoderLayer(cfg_obj, 0).to(td).eval()
+    return (
+        type(layer.self_attn).__name__,
+        str(layer.self_attn.rotary_emb.inv_freq.dtype),
+    )
+
+
+def _replay_verdict(
+    dr: float, db: float, dh: float, bh: float,
+    attn_in: str, attn_std: str, rope_in: str, rope_std: str,
+) -> str:
+    """dr = D vs same-object+model-args, db = D vs standalone,
+    dh = D vs same-object+hand-args, bh = standalone vs same-object+hand-args."""
+    obj_diff = []
+    if attn_in != attn_std:
+        obj_diff.append(f"attention class {attn_in} (in-model) vs {attn_std} (standalone)")
+    if rope_in != rope_std:
+        obj_diff.append(
+            f"rotary inv_freq dtype {rope_in} (in-model) vs {rope_std} (standalone) "
+            f"-- `.to(bfloat16)` casts non-persistent buffers, and inv_freq spans "
+            f"1.0 down to ~2e-8, so bf16 mangles the low frequencies"
         )
+    obj_txt = ("Object differences found: " + "; ".join(obj_diff) + ". ") if obj_diff else \
+              "The two objects look identically configured. "
+
     if dr < 0.999:
         return (
             f"NON-DETERMINISM OR STATE. Replaying the model's exact arguments into the "
             f"same layer object did not reproduce its own output (cos={dr:.6f}). The "
-            f"layer carries state across calls, or something outside it mutates the "
-            f"hidden state. Look for in-place ops and for buffers on "
-            f"NanbeigeRotaryEmbedding."
+            f"layer carries state across calls, or something mutates the hidden state "
+            f"in place. Look for in-place ops and NanbeigeRotaryEmbedding buffers."
+        )
+    if dh > 0.9999:
+        return (
+            f"OBJECT, NOT ARGUMENTS. The same layer object returns D with the model's "
+            f"args (cos={dr:.6f}) AND with the bisect's hand-built args (cos={dh:.6f}) "
+            f"-- so the arguments are equivalent and irrelevant. The standalone layer "
+            f"still differs (cos={db:.6f}), so the fault is in how `_real_layer_stages` "
+            f"CONSTRUCTS the layer. {obj_txt}"
+            f"NOTE the mask shape is a red herring: the model's [1,1,L,L+1] comes from "
+            f"HF's `past_seen_tokens + sequence_length + 1` boilerplate, and eager "
+            f"attention slices it to [:, :, :, :L] before use."
+        )
+    if dh < 0.999 and abs(dh - db) < 1e-4:
+        return (
+            f"ARGUMENTS. The same object gives D with the model's args (cos={dr:.6f}) "
+            f"but reproduces the standalone result with the bisect's hand-built args "
+            f"(cos={dh:.6f}, and hand-args vs standalone = {bh:.6f}). So the arguments "
+            f"really are the difference. Diff `captured_call` against the hand-built "
+            f"invocation -- but check the mask VALUES after slicing to [:, :, :, :L], "
+            f"not the shape: the extra column is discarded by eager attention."
         )
     return (
-        f"LAYER OBJECT. Same arguments give the same answer (cos={dr:.6f}) and the "
-        f"standalone layer also agrees (cos={db:.6f}) -- so B and D should not have "
-        f"differed. Re-check that the crosscheck fed B the same hidden state; the "
-        f"in-model attention class here is `{attn}`, and if the bisect's standalone "
-        f"layer selected a different class from a hand-set `_attn_implementation`, "
-        f"that is the difference."
+        f"MIXED. D vs model-args={dr:.6f}, D vs hand-args={dh:.6f}, D vs standalone="
+        f"{db:.6f}. Both the object and the arguments contribute. {obj_txt}"
     )
 
 
 def render_replay_markdown(out: dict[str, Any]) -> str:
+    oc = out["object_comparison"]
     lines = [
-        f"# Layer-0 argument replay — {out['dtype']}\n\n",
-        f"in-model attention class: `{out['inmodel_attention_class']}`\n\n",
+        f"# Layer-0 replay — {out['dtype']}\n\n",
+        "| property | in-model | standalone |\n|---|---|---|\n",
+        f"| attention class | `{oc['inmodel_attention_class']}` "
+        f"| `{oc['standalone_attention_class']}` |\n",
+        f"| rope inv_freq dtype | `{oc['inmodel_rope_inv_freq_dtype']}` "
+        f"| `{oc['standalone_rope_inv_freq_dtype']}` |\n\n",
         "| pair | cosine | max_abs | rms A | rms B |\n|---|---|---|---|---|\n",
     ]
     for p in out["pairs"]:

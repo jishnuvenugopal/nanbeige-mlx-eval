@@ -285,7 +285,15 @@ def _real_layer_stages(w, cfg: dict, x, dtype: str, layer_idx: int, src: Path):
     cfg_obj._attn_implementation = "eager"
 
     td = torch.float32 if dtype == "fp32" else torch.bfloat16
-    layer = mod.NanbeigeDecoderLayer(cfg_obj, layer_idx).to(td).eval()
+    # Do NOT use `.to(td)` here. Module.to() casts *buffers* as well as
+    # parameters, and NanbeigeRotaryEmbedding registers `inv_freq` as a
+    # non-persistent fp32 buffer (modeling_nanbeige.py:947). Casting it to bf16
+    # mangles the low frequencies (they span 1.0 down to ~2e-8 at
+    # rope_theta = 70e6), and because it is non-persistent, the subsequent
+    # load_state_dict(strict=False) does not restore it. Measured effect:
+    # standalone layer vs in-model layer, cosine 0.925 instead of ~1.0.
+    # `from_pretrained(dtype=...)` does not do this. Cast parameters only.
+    layer = mod.NanbeigeDecoderLayer(cfg_obj, layer_idx).eval()
     missing, unexpected = layer.load_state_dict(
         {k: v.to(td) for k, v in w.items()}, strict=False
     )

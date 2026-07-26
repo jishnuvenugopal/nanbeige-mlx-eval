@@ -74,6 +74,9 @@ def _gather_hf_logits(
     """
     import torch  # type: ignore
     from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer  # type: ignore
+    from ._hfquiet import quiet_hf
+
+    quiet_hf()
 
     torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float32
 
@@ -130,6 +133,11 @@ def _real_q_probe(src: Path) -> tuple[mx.array, str]:
     from .bisect import _embed_rows, load_layer_torch
 
     from transformers import AutoTokenizer  # type: ignore
+
+    from ._hfquiet import quiet_hf
+
+
+    quiet_hf()
 
     cfg = json.loads((src / "config.json").read_text(encoding="utf-8"))
     tok = AutoTokenizer.from_pretrained(str(src), trust_remote_code=True)
