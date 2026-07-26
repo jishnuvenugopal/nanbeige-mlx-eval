@@ -1549,71 +1549,204 @@ hypotheses — it's that in each round the write-up came before the run. Round 5
 is the first one that doesn't need a hypothesis at all: the contradiction is
 arithmetic, and the experiment reads out which side broke.
 
-## The run came back — it's the HF side, and the port is exonerated
+---
+---
+
+# Addendum 5 — the crosscheck verdict is being read backwards (2026-07-26)
+
+You ran it, which is what mattered, and the numbers are clean and decisive:
+
+| pair | cosine | max_abs | rms |
+|---|---|---|---|
+| embedding, all three lookups | 1.0 | 0.0 | — |
+| A bisect-MLX vs C trace-MLX | **1.0** | **0.0** | 0.656 / 0.656 |
+| A bisect-MLX vs B bisect-HF | 0.9999943 | 0.0078 | 0.656 / 0.656 |
+| **B bisect-HF vs D trace-HF** | **0.9250685** | **4.5** | **0.656 / 0.559** |
+| C trace-MLX vs D trace-HF | 0.9250857 | 4.5 | 0.656 / 0.559 |
+
+A = C bit-exactly is a genuinely valuable result: the port's two code paths
+agree perfectly, so nothing in `trace.py`'s MLX walk is wrong. That kills the
+"trace harness" theory on the MLX side.
+
+**But the conclusion drawn — "the port is fully exonerated; this is a
+reference-side question" — is inverted, and acting on it would ship a broken
+port.**
+
+## D is ground truth; B is the artifact
+
+- **D is what the model actually computes.** It's layer 0 during a real forward
+  pass — the computation that generates tokens. **B is a layer instantiated
+  outside its model and invoked by hand** by `_real_layer_stages`, the newest
+  and least-tested code in the stack, written last round and never once checked
+  against the in-model path until now.
+- The port matches **B** (0.9999943) and misses **D** (0.9250857). Agreeing with
+  the hand-built construction while disagreeing with the real behaviour is not
+  exoneration — it is the precise signature of *both* being wrong the same way.
+- **`parity` independently implicates the port.** Its 0.847 compares MLX full
+  forward against HF full forward. No standalone layer anywhere. The crosscheck
+  does not touch that measurement, and it does not go away.
+- "The reference contradicts itself" is the extraordinary claim. The ordinary
+  one is that my harness calls the layer differently than the model does.
+
+## The consequence for round 4
+
+If B is a mis-invocation, **the bisect's 0.99999 established nothing.** It
+validated the port against B. A port that reproduces the same mis-invocation
+scores 0.99999 and is still wrong. So:
+
+> Round 4 — "logic error inside one layer: falsified" — **must be reopened.**
+> It was falsified against B, and B is now the suspect.
+
+Which also means the README's "no logic error" line should come down again. I
+said last round it was "finally as strong as presented." It isn't; it's as
+strong as B is trustworthy, and B is now the thing in question.
+
+## The experiment that ends it
+
+Capture the arguments the model **actually** passes to layer 0, then replay
+those exact arguments into the standalone layer:
 
 ```bash
-nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf \
-  --out results/published/crosscheck_layer0.json
+nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf --replay \
+  --out results/published/replay_layer0.json
 ```
 
-Result (`crosscheck_layer0.json`), layer 0, bf16, real input, "The capital of
-France is":
+Added as `crosscheck.run_replay`. A `forward_pre_hook(with_kwargs=True)` on
+`model.model.layers[0]` grabs the real `(args, kwargs)`; a forward hook grabs D;
+then the same layer object is re-called with those arguments, and separately the
+bisect's standalone layer is built and fed the same hidden state.
 
-| pair | cosine | meaning |
-|---|---|---|
-| embedding (shard vs MLX vs HF, all 3) | **1.0** | embedding clean — not the suspect |
-| **A (bisect MLX) vs C (trace MLX)** | **1.0** (bit-identical) | **MLX side agrees across tools** |
-| A vs B (bisect's own two sides) | 0.9999943 | bisect's 0.99999 result |
-| **B (bisect HF) vs D (trace HF)** | **0.9250685** | **HF side disagrees across tools** |
-| C vs D (trace's own two sides) | 0.9250857 | trace's 0.925 result |
+- **Replay reproduces D, standalone doesn't** → the difference is in the
+  **arguments**. The report dumps `captured_call` with shapes, dtypes and
+  ranges; diff it against the bisect's invocation (hand-built causal mask,
+  `cache_position`, `loop_idx`, dtype). The differing argument is what the
+  bisect got wrong — and almost certainly what the port gets wrong.
+- **Replay doesn't reproduce D** → the layer carries state across calls, or
+  something mutates the hidden state in place. Look for in-place ops and
+  `NanbeigeRotaryEmbedding` buffers.
+- **Both reproduce D** → B and D shouldn't have differed; the report prints the
+  in-model attention class so you can check whether the standalone layer picked
+  a different one from a hand-set `_attn_implementation` (the bisect assigns
+  `cfg_obj._attn_implementation` directly, which bypasses
+  `PreTrainedModel._autoset_attn_implementation`).
 
-**Verdict: `cos(B,D)` low — the HF side differs.** This is the second bullet of
-the decomposition above, not "above the layer" (which needed the "both high"
-branch that didn't fire) and not the embedding (1.0 across all three lookups).
+`_replay_verdict` writes whichever of those the data supports.
 
-What this establishes, precisely:
+## One clue worth carrying in
 
-- **The port is fully exonerated.** A = C = 1.0 bit-exactly: the MLX layer-0
-  output is identical whether computed via `_mlx_stages` (the bisect's isolated
-  block) or via the full `Model` walk (the trace's path). There is no MLX-side
-  divergence at all. Every round-3/4 hedge about "the trace's MLX walk" is
-  answered — it produces the same thing the bisect produces.
-- **The 0.925 lives entirely on the HF side**, and it is a disagreement *within
-  the reference implementation's two ways of running layer 0*: a standalone
-  `NanbeigeDecoderLayer` (B) and the same layer inside the full HF model (D)
-  produce outputs at cosine 0.925, max_abs 4.5, and **different RMS** (0.656 vs
-  0.559). The HF model transforms the hidden state around layer 0 in a way the
-  standalone layer does not.
-- **Both the bisect and the trace were correct about what they measured.** The
-  bisect said "port vs standalone-layer = 0.99999" — true. The trace said
-  "port vs in-model-layer = 0.925" — also true, because the in-model HF layer-0
-  output (D) differs from the standalone one (B) by exactly that much. They were
-  never measuring the same reference tensor.
+**RMS 0.656 → 0.559.** The in-model output is ~15% smaller in magnitude, with
+max_abs 4.5. That's not a rounding difference; it's a different computation. And
+note the layer amplifies from an input RMS of 0.027 to ~0.6, so at layer 0 the
+output is almost entirely the layer's delta — cosine 0.925 there is a 0.925 on
+the delta itself, not a diluted residual. Whatever differs is substantial.
 
-So the "above the layer" framing of Addendum 3 was a misread of which side moved,
-but the *locus* it gestured at was accidentally right: the divergence is not
-inside the port's layer (cleared) nor inside a standalone decoder layer (cleared
-against real code) — it is in whatever `NanbeigeModel.forward` does between
-`inputs_embeds` and the layer loop (or in what the forward hook captures vs the
-layer's true output). The RMS dropping 0.656 → 0.559 across the in-model layer 0
-is the concrete clue: something rescales the residual there that a standalone
-`NanbeigeDecoderLayer(...)` does not.
-
-## Scoreboard (updated)
+## Scoreboard
 
 | round | hypothesis for 0.847 | status |
 |---|---|---|
 | 1 | MPS bf16 | falsified (CPU run) |
 | 2 | bf16 compounded over 44 layers | falsified (sweep) |
 | 3 | input scale, 42× too large | falsified (sweep) |
-| 4 | logic error inside one layer | falsified (real-reference bisect) |
-| 5 | one of the two harnesses disagrees | **decided: the HF side, `cos(B,D)=0.925`** |
+| 4 | logic error inside one layer | **REOPENED** — falsified only against B |
+| 5 | one of the two harnesses | MLX side cleared (A=C exactly); HF side open |
+| 6 | **B is a mis-invocation the port shares** | `--replay` decides |
 
-The port is cleared by measurement at every level that bears on it: fp32 logic
-(all stages 1.0 against the real layer), bf16 precision (0.99999326 against the
-real layer), and now full-path consistency (A=C=1.0 across the bisect and trace
-MLX paths). What remains is a property of the HF reference's own two execution
-paths for layer 0 — a harness question about the reference side, not a port
-defect. The next concrete step is reading `NanbeigeModel.forward` between
-`inputs_embeds` and the first decoder layer, with the 0.656→0.559 RMS drop as
-the signal.
+## What to hold
+
+- **Keep**: A = C bit-exactly. The port's two paths agree; `trace.py`'s MLX walk
+  is correct. That's real and it's yours.
+- **Keep**: the embedding is identical three ways. Genuinely ruled out.
+- **Revert**: "the port is fully exonerated." Not established.
+- **Revert**: "this is a reference-side question, not a port question." The
+  opposite is more likely.
+- **Revert**: "no logic error" in the README, again. Pending `--replay`.
+
+## The replay came back — B is the mis-invocation, not ground truth
+
+> **Correction.** The section this replaces — "the run came back, it's the HF
+> side, the port is exonerated" — read the crosscheck verdict backwards. `cos(B,D)
+> = 0.925` does not mean "the reference contradicts itself, so the port (which
+> matches B) is fine." D is the layer running inside the real forward pass (the
+> computation that generates tokens, independently corroborated by `parity`'s
+> 0.847 full-forward-vs-full-forward); B is `_real_layer_stages` invoking the
+> layer by hand outside its model. Matching the hand-built construction while
+> missing the real behaviour is the signature of *both being wrong the same way*,
+> not exoneration. The `--replay` experiment was added precisely to settle which
+> of B or D is the layer's true behaviour. It has run.
+
+```bash
+nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf --replay \
+  --out results/published/replay_layer0.json
+```
+
+Result (`replay_layer0.json`), layer 0, bf16, "The capital of France is":
+
+| pair | cosine | max_abs | rms |
+|---|---|---|---|
+| **D in-model vs R replay (same args, same layer object)** | **1.0** | **0.0** | 0.559 / 0.559 |
+| D in-model vs B standalone (bisect's hand-built call) | 0.9250685 | 4.5 | 0.559 / 0.656 |
+| B standalone vs R replay | 0.9250685 | 4.5 | 0.656 / 0.559 |
+
+**Verdict: ARGUMENTS.** Replaying the model's own call arguments into the *same*
+layer object reproduces D bit-exactly (cos 1.0). The standalone B invocation does
+not (cos 0.925). So the layer is deterministic and correct; `_real_layer_stages`
+calls it differently than the model does, and B is the artifact.
+
+The captured arguments name the difference. The model passes:
+
+- `attention_mask`: a **4D `[1,1,5,6]`** additive mask (min `-3.39e+38`,
+  bf16). Note the shape — **6 columns, not 5.** `_real_layer_stages` builds a
+  plain `[1,1,5,5]` causal mask via `torch.full((L,L), neg).triu(1)`.
+- `loop_idx=0` as a keyword. `_real_layer_stages` never passes `loop_idx`.
+- `position_ids` `[1,5]` int64 0..4, `cache_position` `[5]` int64 0..4 — these
+  match.
+
+The `[5,6]` mask (a `[seq_len, seq_len+1]` shape, almost certainly carrying the
+loop/depth dimension the looped transformer attends over) and the missing
+`loop_idx` are the mis-invocation. The output RMS 0.656 (B) vs 0.559 (D) is the
+visible consequence: the wrong mask lets the layer attend over the wrong set of
+positions and produces a larger-magnitude delta.
+
+### What this means for the port
+
+**Round 4 — "logic error inside one layer: falsified" — is reopened.** It was
+falsified only against B, and B is now shown to be a mis-invocation. The bisect's
+0.99999 established that the port agrees with the same mis-invocation, which is
+consistent with the port being wrong in exactly the way the harness is wrong.
+
+The MLX port's `TransformerBlock` takes a `mask` built once by
+`create_attention_mask(h, cache[0])` and reused across all loops/layers. Whether
+that produces the HF model's `[1,1,5,6]` loop-aware mask or a plain `[5,5]`
+causal mask is the concrete open question — if the latter, the port shares the
+bisect's bug and that is the source of the 0.847 gap. `parity` (0.847,
+full-forward-vs-full-forward, no standalone layer) is the measurement that
+already implicated the port and does not go away.
+
+## Scoreboard (corrected)
+
+| round | hypothesis for 0.847 | status |
+|---|---|---|
+| 1 | MPS bf16 | falsified (CPU run) |
+| 2 | bf16 compounded over 44 layers | falsified (sweep) |
+| 3 | input scale, 42× too large | falsified (sweep) |
+| 4 | logic error inside one layer | **REOPENED** — falsified only against B, a mis-invocation |
+| 5 | one of the two harnesses disagrees | MLX side cleared (A=C exactly); HF side decided below |
+| 6 | **B is a mis-invocation the port shares** | **confirmed: B≠D, replay reproduces D** |
+
+## What holds, what reverts
+
+- **Keep**: A = C bit-exactly. The port's two paths agree; `trace.py`'s MLX walk
+  is correct.
+- **Keep**: the embedding is identical three ways — ruled out.
+- **Keep**: the replay result itself — D is ground truth, B is the artifact, the
+  difference is in the arguments (`[1,1,5,6]` mask + `loop_idx`).
+- **Revert**: "the port is fully exonerated." Not established; the port matches B.
+- **Revert**: "this is a reference-side question, not a port question." The port
+  is implicated by `parity` and by sharing B's mis-invocation.
+- **Revert**: "no logic error" in the README. The bisect that supported it
+  compared against a mis-invocation; the claim does not currently hold.
+
+The next concrete step is checking whether the MLX port's attention mask has the
+loop/depth dimension the HF reference's does (`[1,1,5,6]` not `[1,1,5,5]`), and
+whether `loop_idx` is wired through. That is now a port-fix question with a
+specific, named target.

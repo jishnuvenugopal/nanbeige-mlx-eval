@@ -1,0 +1,91 @@
+{
+  "src": "models/nanbeige42-hf",
+  "prompt": "The capital of France is",
+  "dtype": "bf16",
+  "n_tokens": 5,
+  "inmodel_attention_class": "NanbeigeAttention",
+  "captured_call": {
+    "positional": [
+      {
+        "type": "Tensor",
+        "shape": [
+          1,
+          5,
+          3072
+        ],
+        "dtype": "torch.bfloat16",
+        "min": -0.777344,
+        "max": 0.507812,
+        "mean": -1.6e-05
+      }
+    ],
+    "keyword": {
+      "attention_mask": {
+        "type": "Tensor",
+        "shape": [
+          1,
+          1,
+          5,
+          6
+        ],
+        "dtype": "torch.bfloat16",
+        "min": -3.3895313892515355e+38,
+        "max": -0.0,
+        "mean": -Infinity
+      },
+      "position_ids": {
+        "type": "Tensor",
+        "shape": [
+          1,
+          5
+        ],
+        "dtype": "torch.int64",
+        "min": 0.0,
+        "max": 4.0,
+        "mean": 2.0
+      },
+      "past_key_value": null,
+      "output_attentions": false,
+      "use_cache": false,
+      "cache_position": {
+        "type": "Tensor",
+        "shape": [
+          5
+        ],
+        "dtype": "torch.int64",
+        "min": 0.0,
+        "max": 4.0,
+        "mean": 2.0
+      },
+      "loop_idx": 0,
+      "loop_cache_layer_idx": null,
+      "mhc_loop_idx": null,
+      "loop_share_kv_cache": null,
+      "depth_attention_kv_cache": null
+    }
+  },
+  "pairs": [
+    {
+      "pair": "D_inmodel vs B_standalone",
+      "cosine": 0.92506854,
+      "max_abs": 4.5,
+      "rms_a": 0.559223,
+      "rms_b": 0.655962
+    },
+    {
+      "pair": "D_inmodel vs R_replay_same_object",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.559223,
+      "rms_b": 0.559223
+    },
+    {
+      "pair": "B_standalone vs R_replay_same_object",
+      "cosine": 0.92506854,
+      "max_abs": 4.5,
+      "rms_a": 0.655962,
+      "rms_b": 0.559223
+    }
+  ],
+  "verdict": "ARGUMENTS. Replaying the model's own call arguments into the same layer reproduces D (cos=1.000000), while the bisect's hand-built invocation does not (cos=0.925069). So the layer is deterministic and correct; `_real_layer_stages` calls it differently than the model does. Diff `captured_call` against the bisect's invocation (mask construction, cache_position, loop_idx, dtype) -- the differing argument is what the bisect got wrong. CRITICAL: the port matches B, so it very likely shares the same mistake. The bisect's 0.99999 does NOT clear the port."
+}

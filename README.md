@@ -41,16 +41,18 @@ This is a **harness + honest small-N eval**, not a leaderboard. Pass rates carry
   once the token cap is raised: **zero truncations across 180 cases** at a
   1024-token cap.
 - ⚠️ **A moderate logit gap vs the HF reference shows up on CPU (mean cosine
-  0.85, top-1 83%)** — and it is **not** MPS noise, not a port defect, and not
-  inside a decoder layer. A cross-check (`bisect` vs `trace` on the same layer 0)
-  localizes it: the MLX port's layer-0 output is **bit-identical** (cosine 1.0)
-  whether computed via the bisect's isolated block or the trace's full-model
-  walk, and a standalone `NanbeigeDecoderLayer` agrees with the port at 0.99999.
-  The 0.925 the trace reports is a disagreement **within the HF reference's own
-  two ways of running layer 0** (standalone layer vs in-model layer, RMS 0.656 vs
-  0.559) — a property of the reference side, not the port. The port is cleared at
-  every level that bears on it. See [§ Fidelity](#fidelity-half-a). It does *not*
-  affect behavior on the agentic suite.
+  0.85, top-1 83%)** — not MPS noise (CPU run reproduces it). Its source is
+  **under active investigation and not yet attributed to the port or the
+  reference.** A cross-check found the port's two code paths agree bit-exactly
+  (cosine 1.0), but a follow-up `--replay` experiment showed the bisect's
+  standalone-layer reference is a *mis-invocation* of the in-model layer (it
+  passes a `[1,1,5,5]` mask and omits `loop_idx`; the real model passes
+  `[1,1,5,6]` and `loop_idx=0`). So the bisect's "0.99999, no logic error" result
+  is not currently trustworthy — it validated the port against the same
+  mis-invocation the port may share. The open question is whether the port's
+  attention mask has the loop/depth dimension the HF reference's does. See
+  [§ Fidelity](#fidelity-half-a). The gap does not affect behavior on the agentic
+  suite.
 - 📌 **A real cost of the looped design nobody else has written down:** full
   262K context is unreachable on a 16 GB machine — the looped trunk needs 44 KV
   slots, ~47 GB at max context — and mlx-lm's `--max-kv-size` is inert for this
@@ -136,16 +138,18 @@ nanbeige-mlx-eval parity --src models/nanbeige42-hf --out benchmark_results/pari
 
 ### Per-layer divergence trace
 
-> **Caveat (read first).** A `crosscheck` of the bisect and trace on layer 0
-> shows the MLX port's output is **bit-identical** (cosine 1.0) across both
-> tools, while the HF reference's layer-0 output **disagrees with itself**
-> (standalone `NanbeigeDecoderLayer` vs the same layer inside the full model:
-> cosine 0.925, RMS 0.656 vs 0.559). So the curve below is a real measurement of
-> the in-model HF layer outputs, but the gap it reports between port and
-> reference is a property of the reference side (the full HF forward transforms
-> the residual around layer 0 in a way a standalone layer does not), **not a
-> property of the port**. The port's full-model layer-0 output matches its
-> isolated-block output exactly.
+> **Caveat (read first).** The bisect and the trace disagree by ~13,000× at layer
+> 0. A `crosscheck` showed the port's two code paths agree bit-exactly (cosine
+> 1.0), and that the disagreement is between the bisect's standalone
+> `NanbeigeDecoderLayer` invocation (B) and the same layer inside the full HF
+> model (D): cosine 0.925, RMS 0.656 vs 0.559. A follow-up `--replay`
+> experiment settles which of B or D is the layer's true behaviour: replaying the
+> model's actual call arguments into the layer reproduces D bit-exactly, while B
+> does not. So **B is a mis-invocation** (it builds a `[1,1,5,5]` mask and omits
+> `loop_idx`; the model passes `[1,1,5,6]` and `loop_idx=0`). The curve below is
+> the real in-model behaviour; the open question is whether the port's mask shares
+> the same mis-invocation, which would make this curve a faithful measurement of a
+> real port bug rather than a reference-side artifact.
 
 `nanbeige-mlx-eval trace` dumps hidden states after each of the 44 effective
 layers on both sides and reports cosine per layer. Reading the curve:
@@ -255,28 +259,40 @@ nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf \
 | pair | cosine | what it is |
 |---|---|---|
 | embedding (shard vs MLX vs HF) | 1.0 | embedding clean |
-| **bisect-MLX vs trace-MLX** | **1.0** (bit-identical) | **port agrees with itself across tools** |
+| **bisect-MLX vs trace-MLX** | **1.0** (bit-identical) | port agrees with itself across tools |
 | bisect-HF vs trace-HF (within bisect) | 0.99999 | bisect's reported agreement |
-| **bisect-HF vs trace-HF** | **0.925** | **reference disagrees with itself across tools** |
+| **bisect-HF vs trace-HF** | **0.925** | standalone layer (B) vs in-model layer (D) |
 
-**The divergence is on the HF reference side, not the port.** The MLX layer-0
-output is bit-identical whether reached via the bisect's isolated block or the
-trace's full-model walk (cosine 1.0, max_abs 0.0). The 0.925 is the HF
-reference's own standalone `NanbeigeDecoderLayer` disagreeing with the same
-layer run inside the full HF model (RMS 0.656 vs 0.559 — something in
-`NanbeigeModel.forward` rescales the residual around layer 0 that the standalone
-layer does not). Both tools were correct about what they measured; they were
-never measuring the same reference tensor. **The port is exonerated at every
-level: fp32 logic, bf16 precision, and full-path consistency.**
+The crosscheck alone is ambiguous about which of B or D is ground truth — and
+reading "the reference disagrees with itself" as exoneration of the port is the
+**wrong** reading (D is a real forward pass, B is a hand-built invocation).
+`crosscheck --replay` settles it:
 
-> Bottom line: **no architectural or arithmetic bug in the port.** The decoder
-> layer is verified against the checkpoint's own `NanbeigeDecoderLayer` at fp32
-> (all stages 1.0) and bf16 (0.99999326), and the port's full-model layer-0
-> output is bit-identical to its isolated-block output. The moderate logit gap
-> reflects a discrepancy **within the HF reference's own two execution paths for
-> layer 0** (standalone vs in-model), not a port defect. It does not affect
-> behavior on the agentic suite. Bit-exact parity is not claimed and not
-> expected in bf16.
+```bash
+nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf --replay \
+  --out results/published/replay_layer0.json
+```
+
+| pair | cosine | what it is |
+|---|---|---|
+| **D in-model vs replay (model's args into same layer)** | **1.0** | layer is deterministic; D is its true output |
+| D in-model vs B standalone | 0.925 | B is the mis-invocation |
+
+**B is the artifact; D is ground truth.** The bisect's `_real_layer_stages`
+passes a `[1,1,5,5]` mask and omits `loop_idx`; the model passes `[1,1,5,6]`
+(the loop/depth dimension) and `loop_idx=0`. The port matches B at 0.99999, so
+the bisect's "no logic error" result is **not trustworthy** — it validated the
+port against a mis-invocation the port likely shares. The open question is
+whether the MLX port's attention mask has the `[1,1,5,6]` loop dimension the HF
+reference's does; if not, that is the source of the 0.847 gap.
+
+> Bottom line: **the source of the logit gap is under active investigation.** The
+> bisect's "no logic error" claim (round 4) is reopened — it was established only
+> against B, a mis-invocation. `parity`'s 0.847 (full-forward-vs-full-forward)
+> still implicates the port. The concrete next check is whether the port's mask
+> matches the reference's `[1,1,5,6]` loop-aware mask. The gap does not affect
+> behavior on the agentic suite. Bit-exact parity is not claimed and not expected
+> in bf16.
 
 ### Functional fidelity (the test that matters for the use case)
 

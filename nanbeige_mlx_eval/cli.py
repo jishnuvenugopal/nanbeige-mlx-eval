@@ -95,7 +95,19 @@ def cmd_trace(args):
 
 
 def cmd_crosscheck(args):
-    from .crosscheck import render_markdown, run_crosscheck
+    from .crosscheck import (
+        render_markdown,
+        render_replay_markdown,
+        run_crosscheck,
+        run_replay,
+    )
+
+    if args.replay:
+        out = run_replay(
+            args.src, prompt=args.prompt, dtype=args.dtype, output=args.out
+        )
+        print(render_replay_markdown(out))
+        return
 
     out = run_crosscheck(
         args.src, prompt=args.prompt, dtype=args.dtype, output=args.out
@@ -289,6 +301,10 @@ def build_parser() -> argparse.ArgumentParser:
     xc.add_argument("--dtype", choices=["bf16", "fp32"], default="bf16")
     xc.add_argument("--out", default=None)
     xc.add_argument("--gate", action="store_true")
+    xc.add_argument("--replay", action="store_true",
+                    help="capture the model's real layer-0 call arguments and replay "
+                         "them standalone — decides whether B or D is the layer's true "
+                         "behaviour, and therefore whether the port is actually cleared")
     xc.set_defaults(func=cmd_crosscheck)
 
     sm = sub.add_parser("smoke", help="gated one-shot real-model generation")

@@ -278,6 +278,190 @@ def _verdict(ab: float, cd: float, ac: float, bd: float, emb: list[dict]) -> str
     )
 
 
+# --------------------------------------------------------------------------
+# replay — which of B or D is the layer's true behaviour?
+# --------------------------------------------------------------------------
+#
+# The crosscheck found cos(B,D) = 0.925: a standalone NanbeigeDecoderLayer and
+# the same layer inside the full model disagree. It is tempting to read that as
+# "the reference contradicts itself, so the port (which matches B) is fine."
+# That reading is backwards:
+#
+#   * D is ground truth. It is what the model computes during a real forward
+#     pass -- the thing that actually generates tokens. B is a layer invoked by
+#     hand, outside its model, by the newest and least-tested code in the stack
+#     (`_real_layer_stages`). Matching the artificial construction while missing
+#     the real one is the opposite of exoneration.
+#   * `parity` (0.847) compares full forward to full forward. No standalone
+#     layer anywhere. The port is implicated by a measurement this crosscheck
+#     does not touch.
+#   * "HF contradicts itself" is the extraordinary claim. The ordinary one is
+#     that `_real_layer_stages` invokes the layer differently than the model
+#     does -- and if so, the bisect's 0.99999 never established anything,
+#     because it validated the port against a mis-invocation the port may share.
+#
+# This replays the EXACT arguments the model passes to layer 0 into the
+# standalone layer. It terminates the search:
+#
+#   replay matches D  -> the difference is in the ARGUMENTS. Diff them; the
+#                        differing one is what the bisect got wrong, and very
+#                        likely what the port gets wrong too.
+#   replay matches B  -> the difference is in the layer OBJECT (attention class
+#                        selected from config, or a config flag that differs
+#                        between `from_pretrained(attn_implementation=...)` and
+#                        a hand-set `cfg._attn_implementation`).
+
+def _describe(v: Any) -> Any:
+    import torch
+    if isinstance(v, torch.Tensor):
+        f = v.detach().float()
+        return {
+            "type": "Tensor", "shape": list(v.shape), "dtype": str(v.dtype),
+            "min": round(f.min().item(), 6), "max": round(f.max().item(), 6),
+            "mean": round(f.mean().item(), 6),
+        }
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    return f"<{type(v).__name__}>"
+
+
+def run_replay(
+    src_dir: str | Path,
+    *,
+    prompt: str = DEFAULT_PROMPT,
+    dtype: str = "bf16",
+    output: str | Path | None = None,
+) -> dict[str, Any]:
+    """Capture layer 0's real call arguments, replay them standalone, compare."""
+    import torch
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer  # type: ignore
+
+    from .bisect import _real_layer_stages, load_layer_torch
+
+    src = Path(src_dir)
+    td = torch.bfloat16 if dtype == "bf16" else torch.float32
+    tok = AutoTokenizer.from_pretrained(str(src), trust_remote_code=True)
+    ids = tok.encode(prompt, add_special_tokens=False)
+
+    cfg_obj = AutoConfig.from_pretrained(str(src), trust_remote_code=True)
+    cfg_obj.rope_scaling = None
+    model = AutoModelForCausalLM.from_pretrained(
+        str(src), config=cfg_obj, trust_remote_code=True,
+        dtype=td, attn_implementation="eager",
+    ).eval()
+
+    grabbed: dict[str, Any] = {}
+
+    def pre_hook(_m, args, kwargs):
+        if "args" not in grabbed:               # first call only == loop 0
+            grabbed["args"] = args
+            grabbed["kwargs"] = kwargs
+        return None
+
+    def post_hook(_m, _a, out):
+        grabbed.setdefault("D", (out[0] if isinstance(out, tuple) else out).detach().float())
+
+    layer0 = model.model.layers[0]
+    h1 = layer0.register_forward_pre_hook(pre_hook, with_kwargs=True)
+    h2 = layer0.register_forward_hook(post_hook)
+    try:
+        with torch.no_grad():
+            model(torch.tensor([ids]), use_cache=False)
+    finally:
+        h1.remove(); h2.remove()
+
+    # which attention class did the in-model layer actually get?
+    inmodel_attn = type(layer0.self_attn).__name__
+
+    # Replay those exact arguments into the SAME layer object.
+    with torch.no_grad():
+        replay_same_obj = layer0(*grabbed["args"], **grabbed["kwargs"])
+    replay_same_obj = (
+        replay_same_obj[0] if isinstance(replay_same_obj, tuple) else replay_same_obj
+    ).detach().float()
+
+    D = grabbed["D"]
+    hs = grabbed["args"][0] if grabbed["args"] else grabbed["kwargs"]["hidden_states"]
+    del model
+
+    # Now the standalone layer the bisect builds, given the SAME hidden state.
+    cfg = json.loads((src / "config.json").read_text(encoding="utf-8"))
+    tw = load_layer_torch(src, 0, dtype)
+    B = _real_layer_stages(tw, cfg, hs.to(td), dtype, 0, src)["block"].detach().float()
+    del tw
+
+    d = D[0, -1].tolist()
+    b = B[0, -1].tolist()
+    r = replay_same_obj[0, -1].tolist()
+
+    out_d = {
+        "src": str(src), "prompt": prompt, "dtype": dtype, "n_tokens": len(ids),
+        "inmodel_attention_class": inmodel_attn,
+        "captured_call": {
+            "positional": [_describe(a) for a in grabbed["args"]],
+            "keyword": {k: _describe(v) for k, v in grabbed["kwargs"].items()},
+        },
+        "pairs": [
+            _pair("D_inmodel", d, "B_standalone", b),
+            _pair("D_inmodel", d, "R_replay_same_object", r),
+            _pair("B_standalone", b, "R_replay_same_object", r),
+        ],
+        "verdict": _replay_verdict(_cos(d, r), _cos(d, b), inmodel_attn),
+    }
+    if output:
+        p = Path(output)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(out_d, indent=2), encoding="utf-8")
+    return out_d
+
+
+def _replay_verdict(dr: float, db: float, attn: str) -> str:
+    if dr > 0.9999 and db < 0.999:
+        return (
+            f"ARGUMENTS. Replaying the model's own call arguments into the same layer "
+            f"reproduces D (cos={dr:.6f}), while the bisect's hand-built invocation does "
+            f"not (cos={db:.6f}). So the layer is deterministic and correct; "
+            f"`_real_layer_stages` calls it differently than the model does. Diff "
+            f"`captured_call` against the bisect's invocation (mask construction, "
+            f"cache_position, loop_idx, dtype) -- the differing argument is what the "
+            f"bisect got wrong. CRITICAL: the port matches B, so it very likely shares "
+            f"the same mistake. The bisect's 0.99999 does NOT clear the port."
+        )
+    if dr < 0.999:
+        return (
+            f"NON-DETERMINISM OR STATE. Replaying the model's exact arguments into the "
+            f"same layer object did not reproduce its own output (cos={dr:.6f}). The "
+            f"layer carries state across calls, or something outside it mutates the "
+            f"hidden state. Look for in-place ops and for buffers on "
+            f"NanbeigeRotaryEmbedding."
+        )
+    return (
+        f"LAYER OBJECT. Same arguments give the same answer (cos={dr:.6f}) and the "
+        f"standalone layer also agrees (cos={db:.6f}) -- so B and D should not have "
+        f"differed. Re-check that the crosscheck fed B the same hidden state; the "
+        f"in-model attention class here is `{attn}`, and if the bisect's standalone "
+        f"layer selected a different class from a hand-set `_attn_implementation`, "
+        f"that is the difference."
+    )
+
+
+def render_replay_markdown(out: dict[str, Any]) -> str:
+    lines = [
+        f"# Layer-0 argument replay — {out['dtype']}\n\n",
+        f"in-model attention class: `{out['inmodel_attention_class']}`\n\n",
+        "| pair | cosine | max_abs | rms A | rms B |\n|---|---|---|---|---|\n",
+    ]
+    for p in out["pairs"]:
+        lines.append(
+            f"| {p['pair']} | {p['cosine']} | {p['max_abs']} | {p['rms_a']} | {p['rms_b']} |\n"
+        )
+    lines.append("\n## Arguments the model actually passed\n\n```json\n")
+    lines.append(json.dumps(out["captured_call"], indent=2))
+    lines.append("\n```\n\n")
+    lines.append(f"**Verdict.** {out['verdict']}\n")
+    return "".join(lines)
+
+
 def render_markdown(out: dict[str, Any]) -> str:
     lines = [
         f"# bisect vs trace cross-check — layer 0, {out['dtype']}\n\n",
