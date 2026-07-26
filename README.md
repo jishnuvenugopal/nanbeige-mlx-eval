@@ -44,8 +44,11 @@ This is a **harness + honest small-N eval**, not a leaderboard. Pass rates carry
   (mean cosine 0.85, top-1 83%)** — and it is **not** MPS noise: running the
   reference on CPU reproduces the same gap. A single-layer fp32 bisect
   (`bisect --dtype fp32`) shows every one of 14 stages agrees to cosine 1.0
-  (max-abs ≤ 1.3e-05): the port's arithmetic is **verified correct** and the
-  gap is a precision effect, compounded across 44 effective layers — see
+  (max-abs ≤ 1.3e-05): the port's arithmetic is **verified correct**. The gap's
+  *cause* is **not yet established** — an input-scale sweep ruled out both bf16
+  compounding and input magnitude, and the per-layer bisect and the per-layer
+  trace disagree by ~13,000× at layer 0, which means the two tools are not
+  measuring the same thing (the trace harness is the active suspect). See
   [§ Fidelity](#fidelity-half-a). It does *not* affect behavior on the agentic
   suite.
 - 📌 **A real cost of the looped design nobody else has written down:** full
@@ -123,7 +126,7 @@ nanbeige-mlx-eval parity --src models/nanbeige42-hf --out benchmark_results/pari
 | mean logit cosine | **0.847** |
 | min logit cosine | 0.590 |
 | per-prompt cosine | `0.99, 0.59, 0.59, 0.98, 0.96, 0.97` |
-| RoPE bf16 floor (isolated) | max-abs **0.015** on cos/sin vectors (reference downcasts to bf16; MLX stays fp32). Localized: `--bf16-rope` erases it at the RoPE stage but moves the per-layer block cosine by ~1e-7 — RoPE precision is real but not the dominant cause of the end-to-end gap |
+| RoPE bf16 floor (isolated) | max-abs **0.011** (0.78% of probe RMS) on the cos/sin downcast, measured with a real-`q` probe and the effect isolated to cos/sin only (`results/published/parity_cpu_bf16.json`). `--bf16-rope` moves the per-layer block cosine by ~1e-7 at the real scale — real, localized, not the dominant cause of the end-to-end gap |
 
 > **Important correction.** An earlier version of this report attributed the gap
 > to "Metal-vs-MPS bfloat16 matmul differences." That hypothesis is **falsified**:
@@ -131,7 +134,16 @@ nanbeige-mlx-eval parity --src models/nanbeige42-hf --out benchmark_results/pari
 > old 0.844 on MPS). The gap is **not** MPS-specific. What it actually is, see
 > the trace below.
 
-### Per-layer divergence trace (the actual diagnosis)
+### Per-layer divergence trace
+
+> **Caveat (read first).** The fp32 bisect + scale sweep (below) show that a
+> single layer loses only ~7e-6 of cosine at the real input scale, while this
+> trace reports layer 0 alone at 0.925 — a ~13,000× disagreement at the same
+> layer. That means the trace and the bisect are **not measuring the same
+> thing**, and the curve below is most likely a harness artifact (forward-hook
+> ordering, token slice, mask, or a dtype mismatch on the trace's MLX side),
+> not a measurement of port divergence. The data is kept here as the record of
+> what the trace reports; treat it as unexplained pending a `trace.py` audit.
 
 `nanbeige-mlx-eval trace` dumps hidden states after each of the 44 effective
 layers on both sides and reports cosine per layer. Reading the curve:
@@ -150,10 +162,13 @@ layers on both sides and reports cosine per layer. Reading the curve:
   cannot improve over 18 of 22 layers. The step at the loop boundary is a
   residual-magnitude effect, not a logic bug (see the bisect below).
 - **Layer 0 receives an identical input on both sides** (same embedding
-  lookup) yet lands at cosine 0.925 — an error of ~38% of the output norm
-  after one layer. That is far larger than bf16 per-op error (~0.4%), which
-  is why "it's just numerics" was the wrong first read: the per-layer error
-  is small in *absolute* terms but large *relative* to a small residual.
+  lookup) yet *the trace says* it lands at cosine 0.925 — an error of ~38% of
+  the output norm after one layer. That is far larger than bf16 per-op error
+  (~0.4%) — **and it is also exactly what the bisect contradicts**: feeding the
+  same real embedding to layer 0 directly gives block cosine 0.99999304. Hence
+  the caveat above. The trace's "identical input, 0.925 output" cannot both be
+  true if the bisect's "identical input, 0.99999 output" is, and the bisect is
+  the one measured in isolation with the mask and dtype controlled.
 
 ### The decisive experiment: single-layer fp32 bisect
 
@@ -169,11 +184,11 @@ nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype fp32 --gate
 ```
 
 **Result (`results/published/bisect_fp32.json`): every stage agrees to cosine
-1.0, max-abs ≤ 1.3e-05.** No first-divergent stage. The port's RMSNorm,
-projections, RoPE, SwiGLU and the assembled block are all bit-faithful to the
-reference in fp32. **This verifies the arithmetic is correct**; the end-to-end
-gap is a bf16 precision effect, compounded across 44 effective layers and
-re-exposed at each norm.
+1.0, max-abs ≤ 1.3e-05, re-confirmed at the real embedding input (`--input real`).**
+No first-divergent stage. The port's RMSNorm, projections, RoPE, SwiGLU and the
+assembled block are all bit-faithful to the reference in fp32. **This verifies
+the arithmetic is correct.** It does *not* explain the end-to-end gap — see the
+scale sweep below.
 
 ### Isolating RoPE precision
 
@@ -190,17 +205,47 @@ nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype bf16 --bf16-rope
 
 **Result (`results/published/bisect_bf16_rope.json`):** the RoPE-stage max-abs
 drops from 0.0156 to 0.0001 (the gap is exactly the fp32-vs-bf16 cos/sin
-difference), but the per-layer block cosine moves only 0.99999421 → 0.99999433
-— a shift of ~1e-7. **RoPE precision is real and localized, but it is not the
-dominant cause of the end-to-end gap.** The 0.847 end-to-end cosine is the
-accumulation of all the small bf16 stage errors (~1e-5 each, see
-`bisect_bf16.json`) compounded over 44 layers.
+difference), but the per-layer block cosine moves only 0.99999304 → 0.99999381
+at the real input scale — a shift of ~1e-7. **RoPE precision is real and
+localized, but it is not the dominant cause of the end-to-end gap.**
 
-> Bottom line: **no architectural or arithmetic bug** (verified by the
-> lockstep cache test, the 44-layer trace, and the fp32 stage-by-stage bisect).
-> A moderate bf16 logit gap is present, **fully attributed to bf16 precision**
-> rather than hand-waved, and it does not affect behavior on the agentic suite.
-> Bit-exact parity is not claimed and not expected in bf16.
+### Why "compounded bf16 precision" is *not* the explanation
+
+The earlier version of this section closed with "the 0.847 end-to-end cosine is
+the accumulation of the small bf16 stage errors (~1e-5 each) compounded over 44
+layers." That is **arithmetically impossible** and an input-scale sweep has
+falsified it:
+
+```bash
+nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype bf16 --sweep \
+  --out results/published/bisect_scale_sweep.json
+```
+
+| input rms | 1.0 | 0.1 | 0.024 | 0.01 | **real (0.027)** |
+|---|---|---|---|---|---|
+| block cosine | 0.99999402 | 0.99997704 | 0.99997669 | 0.99997499 | **0.99999304** |
+| 1 − cosine | 6.0e-6 | 2.3e-5 | 2.3e-5 | 2.5e-5 | **7.0e-6** |
+
+One layer loses ~7e-6 of cosine at the real operating point. Even accumulating
+linearly, 44 layers lose ~3e-4 — four orders of magnitude short of the 0.15 the
+end-to-end gap implies. The gap is also **not** an input-magnitude effect:
+1−cosine stays in the 1e-5 band from rms 1.0 down to rms 0.01.
+
+The remaining fact is that the per-layer bisect (this tool) and the per-layer
+trace (the table above) disagree by ~13,000× at layer 0 — 7e-6 vs 0.075 — at the
+same layer and scale. That means the two tools are not measuring the same thing,
+and the 0.925 trace curve is most likely a harness artifact (forward-hook
+ordering, token slice, mask, or a dtype mismatch on the trace's MLX side).
+**Auditing `trace.py` is the open item; the 0.847 number should be treated as an
+unexplained measurement, not a port defect.** The fp32 bisect stands regardless:
+logic bugs are input-independent, and all 14 stages are at cosine 1.0.
+
+> Bottom line: **no architectural or arithmetic bug** (verified by the fp32
+> stage-by-stage bisect at the real input scale). A moderate bf16 logit gap is
+> present and **not yet explained** — the two leading hypotheses (bf16
+> compounding, input scale) are both falsified by the sweep, and the trace
+> harness is the active suspect. It does not affect behavior on the agentic
+> suite. Bit-exact parity is not claimed and not expected in bf16.
 
 ### Functional fidelity (the test that matters for the use case)
 

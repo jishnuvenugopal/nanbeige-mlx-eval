@@ -1084,3 +1084,200 @@ result in the project.
 | `--repeats 3` on the published ladder | flag works, unused |
 | git commit + manifest re-stamp | not done |
 | HF weight upload | prepared, `--dry-run` verified, not pushed |
+
+---
+---
+
+# Addendum 2 — the bisect ran at the wrong input scale (2026-07-26)
+
+> **Update after the sweep ran:** the bug below was real and worth fixing (a
+> unit-variance random probe is the wrong operating point for a precision claim,
+> and the artifacts were stale). But the *hypothesis* this addendum builds
+> toward — that the 42× scale gap explains the 13,000× bisect-vs-trace
+> contradiction — **is falsified by the sweep.** Cosine stays flat at ~0.99999
+> at every input scale including the real one. The contradiction is real; input
+> scale is not its cause. See "Fixed — and what the sweep actually showed" at
+> the end of this addendum for the data and the corrected conclusion. The
+> reasoning is kept below as the record of what was suspected.
+
+The ladder work is good and the suite widening is the right call — 27/30, flat
+across quants, with three cases failing consistently at every quant, is a real
+measurement where 8/8 was not. Reporting the ~90% ceiling instead of tuning the
+cases to pass was the correct decision.
+
+The fidelity conclusion has a problem. **My `bisect.py` had a bug and I own it:
+it fed the layer a unit-variance random probe.**
+
+## The contradiction
+
+Same layer, same dtype, same framework pair, two tools:
+
+| measurement | layer-0 cosine | 1 − cosine |
+|---|---|---|
+| `bisect --dtype bf16` (random probe) | 0.99999421 | 5.8 × 10⁻⁶ |
+| `trace` layer 0 (real forward pass) | 0.925086 | 7.5 × 10⁻² |
+
+**A factor of ~13,000.** Both cannot be right, and the README now cites the
+first to explain the second:
+
+> the 0.847 end-to-end cosine is bf16 precision compounded over 44 layers
+
+That doesn't work arithmetically. If one layer loses 5.8 × 10⁻⁶ of cosine, 44
+layers lose ~10⁻⁴ even accumulating linearly — nowhere near 0.15. And the trace
+says **layer 0 alone** loses 0.075, which the bisect says is four orders of
+magnitude too big. The bisect didn't confirm the compounding story; it
+contradicted it, and the contradiction was read as agreement.
+
+## The suspected cause: input scale (turned out not to be it)
+
+> The argument below is mechanically sound but empirically wrong — the sweep in
+> the "Fixed" section shows scale moves 1−cosine by only ~4× across two orders
+> of magnitude, never approaching the 0.075 the trace reports. Kept as the
+> record of the hypothesis.
+
+The only difference between the two is what goes into layer 0.
+`bisect.run_bisect` used `rng.standard_normal(...)` — **RMS 1.0**. I read the
+actual embedding rows out of the shards:
+
+```
+model.embed_tokens.weight   shape=[166144, 3072]   sampled row RMS ≈ 0.024
+```
+
+`initializer_range` is 0.02, so that checks out. **The real layer-0 input is
+~42× smaller than the probe I used.**
+
+That is not a cosmetic difference in bf16. Concretely, in
+`x · rsqrt(mean(x²) + eps)` with `eps = 1e-5`:
+
+| | mean(x²) | eps as % of variance |
+|---|---|---|
+| random probe | 1.0 | 0.001% |
+| real embedding | 5.8 × 10⁻⁴ | **1.7%** |
+
+And it compounds beyond eps: attention logits from a real embedding are sharply
+peaked, so softmax is near-one-hot and small perturbations move real probability
+mass; logits from Gaussian noise are near-uniform, so softmax averages errors
+away. The random probe sits in the most forgiving regime available.
+
+**What the fp32 run still proves.** Logic bugs are input-independent — a wrong
+transpose, head split, scale, or RoPE convention breaks on any input. All 14
+stages at cosine 1.0 (max_abs ≤ 1.3e-05) in fp32 **does** rule those out, and
+that's a real result worth keeping. What it does not license is the bf16
+attribution, because that number was measured 42× away from the operating point.
+
+Same for the `--bf16-rope` conclusion. "Moves the block by 1.2e-7, therefore not
+the dominant cause" is a statement about the random-probe regime only. At the
+real scale, `eps` is 1.7% of the variance and the whole error budget is different.
+
+## Fixed — and what the sweep actually showed
+
+`bisect.py` now defaults to `--input real` (reads the actual `embed_tokens` rows
+straight from the shards — no model load), records `input_rms` and `input_desc`
+in every report, and attaches an explicit `WARNING` field to any bf16 run done
+on a random probe. `--sweep` was added. Then the sweep was run:
+
+```bash
+nanbeige-mlx-eval bisect --src models/nanbeige42-hf --dtype bf16 --sweep \
+  --out results/published/bisect_scale_sweep.json
+```
+
+**The outcome was the one I bet against.** Cosine does *not* collapse toward
+0.925 at the real scale — it stays flat at ~0.99999 at every RMS point,
+*including* the real embedding:
+
+| input rms | block cosine | 1 − cosine | worst stage |
+|---|---|---|---|
+| 1.0 | 0.99999402 | 5.98e-06 | down_proj |
+| 0.1 | 0.99997704 | 2.30e-05 | swiglu |
+| 0.024 | 0.99997669 | 2.33e-05 | swiglu |
+| 0.01 | 0.99997499 | 2.50e-05 | swiglu |
+| **real embed (0.02721)** | **0.99999304** | **6.96e-06** | swiglu |
+
+The 42× scale hypothesis — the premise of this whole addendum — is **falsified
+by the data**. The eps-as-%-of-variance argument in the previous section is real
+arithmetic but it does not move the per-layer block cosine enough to matter:
+1−cosine varies by ~4× across two orders of magnitude of scale and never leaves
+the 1e-5 band. `input_layernorm` is at cosine **1.0** at the real scale, not the
+culprit I predicted; the worst stage is `swiglu`/`down_proj` at ~0.99998, still
+"ok" by the bf16 verdict bar.
+
+So the 13,000× contradiction in the table at the top of this addendum does **not**
+resolve the way I argued it would. The bisect and the trace disagree by four
+orders of magnitude at the *same* layer, *after* scale is controlled for. That
+leaves exactly one possibility from the three I listed: **`trace.py` is measuring
+something different from what the bisect measures.** The 0.925 curve is most
+likely a harness artifact — hook ordering, which token position is sliced on each
+side, whether both sides see the same attention mask, or a dtype mismatch on the
+MLX side of the trace — not a property of the port.
+
+The regenerated artifacts reflect this. `bisect_fp32.json`, `bisect_bf16.json`,
+and `bisect_bf16_rope.json` are re-run at `--input real` (the stale random-probe
+versions are replaced in place — the `input_rms` field now in every report is
+what carries the regime, not a filename suffix). `--bf16-rope` moves the block
+cosine by 7.7e-7 at the real scale (0.99999304 → 0.99999381); that "not
+dominant" conclusion is now measured at the right operating point and stands.
+
+## What the README should say
+
+Every fidelity claim added in the last pass was justified by the random-probe
+number; the sweep has now shown that number was *coincidentally* close to the
+real-scale one (scale barely matters here), but the attribution it supported is
+still wrong:
+
+- ✅ Keep: "no logic error — all 14 stages agree to fp32 precision." (Re-confirmed
+  at `--input real`: all 14 stages at cosine 1.0, gate passes.)
+- ❌ Remove: "the 0.847 is bf16 precision compounded over 44 layers." One layer
+  loses ~7e-6 of cosine at the real scale, so 44 layers lose ~3e-4 linearly —
+  four orders of magnitude short of 0.15. The compounding story is arithmetically
+  impossible and the sweep killed it.
+- ✅ Keep (now correctly measured): "RoPE precision is real but localized; the
+  `--bf16-rope` shift is ~1e-7 at the real scale, not the dominant cause."
+  Re-measured with a real-q probe and cos/sin isolated (see below), the max_abs
+  floor is 0.011 (0.78% of probe RMS).
+- ➕ Add: "Per-layer bf16 agreement is essentially **flat** in input scale (1−cosine
+  stays in the 1e-5 band from rms 1.0 down to 0.01); scale does not explain the
+  end-to-end gap. Sweep in `results/published/bisect_scale_sweep.json`."
+- ➕ Add: "The end-to-end 0.847 cosine is **unexplained**. The bisect (per-layer,
+  stage-by-stage) and the trace (per-effective-layer hidden-state cosine)
+  disagree by ~13,000× at layer 0 with scale controlled for, which means the two
+  tools are not measuring the same thing. `trace.py` is the suspect; auditing it
+  (hook ordering, token slice, mask, dtype) is the next step."
+
+## rope_precision fixed (the "two smaller things" item)
+
+`rope_precision.max_abs` drifted 0.02242 → 0.015007 between runs. The user's
+note flagged this and was right that it should be bit-identical, but the
+diagnosis went deeper than nondeterminism: the probe was random (same bug class
+as the bisect one), and `ref_rope` conflated three effects (x-cast, cos/sin-cast,
+bf16 arithmetic) under a label that claimed to measure only the cos/sin downcast.
+
+Rewritten (`parity.py`): the probe is now real `q_proj(input_layernorm(embed))`
+at layer 0 (reusing the bisect shard readers, no model load), and `ref_rope` has
+a `round_trig` flag that rounds **only** cos/sin to bf16 while x stays fp32 on
+both sides. The metric is now reproducible **by construction** — no RNG in the
+path — and reports `max_abs` relative to ‖q‖ alongside the absolute value.
+
+Corrected value, bit-identical across runs: **cosine 1.0, max_abs 0.011297
+(0.007806 of probe RMS 1.447217).** A `--seed` flag was added to the `parity`
+subcommand for consistency with `bisect` (harmless for this metric, which no
+longer needs it). Convention added to both docstrings: *precision measurements
+use real activations; only logic checks may use synthetic input* — this codebase
+was bitten by a random probe standing in for a real activation twice in one week.
+
+(The other "smaller thing" — five of six ladder configs at `--repeats 1` while
+the README claims medians — stands as written; out of scope for this pass.)
+
+## Standing
+
+The port is in good shape: **no logic error** (re-confirmed at the real scale),
+a genuinely honest ~90% agentic result, clean packaging, real provenance.
+
+The 0.847 end-to-end cosine is **not explained**, and the sweep ruled out the
+two leading candidates (bf16 compounding, input scale). What remains is a
+measurement disagreement: the bisect says layer 0 loses 7e-6 of cosine, the
+trace says it loses 0.075, at the same layer and scale. The next step is not
+another precision hypothesis — it is auditing `trace.py`'s harness (forward-hook
+ordering on the HF side, the `[-1]` token slice on both sides, whether the MLX
+walk applies the loop-boundary norm at the same point HF does, and whether both
+sides actually run in bf16). Until that audit lands, the 0.847 number should be
+treated as an open measurement question, not a port defect.

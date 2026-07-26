@@ -95,7 +95,20 @@ def cmd_trace(args):
 
 
 def cmd_bisect(args):
-    from .bisect import render_markdown, run_bisect
+    from .bisect import (
+        render_markdown,
+        render_sweep_markdown,
+        run_bisect,
+        run_scale_sweep,
+    )
+
+    if args.sweep:
+        out = run_scale_sweep(
+            args.src, layer_idx=args.layer, dtype=args.dtype,
+            seq_len=args.seq_len, seed=args.seed, output=args.out,
+        )
+        print(render_sweep_markdown(out))
+        return
 
     r = run_bisect(
         args.src,
@@ -104,6 +117,9 @@ def cmd_bisect(args):
         seq_len=args.seq_len,
         seed=args.seed,
         bf16_rope=args.bf16_rope,
+        input_mode=args.input,
+        target_rms=args.rms,
+        prompt=args.prompt,
         output=args.out,
     )
     print(render_markdown(r))
@@ -119,7 +135,7 @@ def cmd_convert(args):
 
 def cmd_parity(args):
     r = run_parity(
-        args.src, output=args.out, device=args.device, dtype=args.dtype
+        args.src, output=args.out, device=args.device, dtype=args.dtype, seed=args.seed
     )
     summary = {k: v for k, v in r.items() if k != "per_prompt"}
     print(json.dumps(summary, indent=2))
@@ -204,6 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="device for the HF reference (default cpu; bf16/CPU avoids MPS noise)")
     par.add_argument("--dtype", choices=["bf16", "fp32"], default="bf16",
                      help="dtype for both sides (bf16/CPU ~= 8.3 GB; fits 16 GB)")
+    par.add_argument("--seed", type=int, default=0,
+                     help="seed for any sampling in the parity run (rope_precision "
+                          "uses real q and is reproducible regardless)")
     par.add_argument("--gate", type=float, default=None,
                      help="exit non-zero if mean_cosine falls below this (e.g. 0.99)")
     par.set_defaults(func=cmd_parity)
@@ -228,6 +247,16 @@ def build_parser() -> argparse.ArgumentParser:
     bi.add_argument("--bf16-rope", action="store_true",
                     help="apply the reference's bf16 cos/sin downcast on BOTH sides, "
                          "to isolate that effect")
+    bi.add_argument("--input", choices=["real", "scaled", "random"], default="real",
+                    help="probe input. 'real' = actual embed_tokens output (rms~0.024, "
+                         "the only regime valid for bf16 precision claims). "
+                         "'random' is unit-variance and ~42x too large.")
+    bi.add_argument("--rms", type=float, default=None,
+                    help="target input RMS for --input scaled")
+    bi.add_argument("--prompt", default=None, help="prompt for --input real")
+    bi.add_argument("--sweep", action="store_true",
+                    help="sweep input RMS from 1.0 down to the real embedding scale "
+                         "and report block cosine at each -- reconciles bisect vs trace")
     bi.add_argument("--out", default=None)
     bi.add_argument("--gate", action="store_true",
                     help="exit non-zero if any stage diverges")

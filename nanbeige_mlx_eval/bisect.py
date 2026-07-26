@@ -320,6 +320,74 @@ STAGE_ORDER = [
     "gate_proj", "up_proj", "swiglu", "down_proj", "block",
 ]
 
+# The residual stream at layer 0 is the raw embedding lookup, whose rows have
+# RMS ~= 0.024 for this checkpoint (initializer_range 0.02). A unit-variance
+# random probe is therefore ~42x too large and exercises a completely different
+# numerical regime -- notably, `eps=1e-5` is 0.001% of the variance at RMS 1.0
+# but 1.7% of it at RMS 0.024. Always state the regime a bisect was run in.
+EMBED_RMS = 0.024
+
+
+def make_input(
+    src: Path, cfg: dict, *, mode: str, seq_len: int, seed: int,
+    target_rms: float | None = None, prompt: str | None = None,
+):
+    """Build the probe hidden state. Returns (x_np, description).
+
+    mode='real'    : the actual embed_tokens output for `prompt` -- the only
+                     regime that corresponds to what layer 0 really sees.
+    mode='scaled'  : random, rescaled to `target_rms` (for a scale sweep).
+    mode='random'  : unit-variance random. Fine for catching logic bugs, which
+                     are input-independent; misleading for precision claims.
+
+    Convention: precision measurements use real activations; only logic checks
+    may use synthetic input. (This codebase was bitten twice in one week by a
+    random probe standing in for a real activation -- bisect.py and parity.py.)
+    """
+    import numpy as np
+
+    if mode == "real":
+        from transformers import AutoTokenizer  # type: ignore
+        tok = AutoTokenizer.from_pretrained(str(src), trust_remote_code=True)
+        ids = tok.encode(prompt or "The capital of France is", add_special_tokens=False)
+        emb = _embed_rows(src, ids)
+        x = emb[None, :, :].astype("float32")
+        rms = float(np.sqrt((x.astype("float64") ** 2).mean()))
+        return x, f"real embed_tokens({len(ids)} tokens), rms={rms:.5f}"
+
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((1, seq_len, cfg["hidden_size"])).astype("float32")
+    if mode == "scaled":
+        tr = target_rms if target_rms is not None else EMBED_RMS
+        x = (x / float(np.sqrt((x.astype("float64") ** 2).mean())) * tr).astype("float32")
+        return x, f"random scaled to rms={tr:.5f}"
+    return x, "random, rms=1.0 (NOT the real layer-0 regime)"
+
+
+def _embed_rows(src: Path, ids: list[int]):
+    """Read just the needed embedding rows straight out of the shards."""
+    import json as _json
+    import struct
+
+    import numpy as np
+
+    name = "model.embed_tokens.weight"
+    for shard in sorted(src.glob("*.safetensors")):
+        with open(shard, "rb") as f:
+            n = struct.unpack("<Q", f.read(8))[0]
+            hdr = _json.loads(f.read(n))
+        if name not in hdr:
+            continue
+        meta = hdr[name]
+        if meta["dtype"] != "BF16":
+            raise NotImplementedError(f"embed dtype {meta['dtype']}")
+        off = 8 + n + meta["data_offsets"][0]
+        mm = np.memmap(shard, dtype=np.uint16, mode="r", offset=off,
+                       shape=tuple(meta["shape"]))
+        u = np.stack([mm[i].astype(np.uint32) << 16 for i in ids])
+        return u.view(np.float32)
+    raise KeyError(name)
+
 
 def run_bisect(
     src_dir: str | Path,
@@ -330,12 +398,23 @@ def run_bisect(
     seed: int = 0,
     bf16_rope: bool = False,
     output: str | Path | None = None,
+    input_mode: str = "real",
+    target_rms: float | None = None,
+    prompt: str | None = None,
 ) -> dict[str, Any]:
     """Compare one decoder layer stage-by-stage between the port and the reference.
 
-    ``dtype='fp32'`` is the decisive run: ~573 MB per side, so it fits where the
-    full-model fp32 comparison does not. ``bf16_rope=True`` makes *both* sides
-    use the reference's bf16 cos/sin downcast, isolating that one effect.
+    ``dtype='fp32'`` is the decisive run for *logic*: ~573 MB per side, so it
+    fits where the full-model fp32 comparison does not. Logic bugs are
+    input-independent, so any probe finds them.
+
+    ``dtype='bf16'`` results are only meaningful at the **real input scale**.
+    Layer 0 sees the raw embedding (RMS ~0.024 here); a unit-variance probe is
+    ~42x too large and will report agreement the model never actually achieves.
+    Hence ``input_mode`` defaults to ``'real'``.
+
+    ``bf16_rope=True`` makes *both* sides use the reference's bf16 cos/sin
+    downcast, isolating that one effect.
     """
     import numpy as np
     import torch
@@ -343,9 +422,12 @@ def run_bisect(
     src = Path(src_dir)
     cfg = json.loads((src / "config.json").read_text(encoding="utf-8"))
 
-    rng = np.random.default_rng(seed)
-    # RMS ~1 per element, the scale a real residual stream sits at early on
-    x_np = rng.standard_normal((1, seq_len, cfg["hidden_size"])).astype("float32")
+    x_np, input_desc = make_input(
+        src, cfg, mode=input_mode, seq_len=seq_len, seed=seed,
+        target_rms=target_rms, prompt=prompt,
+    )
+    seq_len = x_np.shape[1]
+    input_rms = float(np.sqrt((x_np.astype("float64") ** 2).mean()))
 
     tw = load_layer_torch(src, layer_idx, dtype)
     tx = torch.from_numpy(x_np).to(torch.float32 if dtype == "fp32" else torch.bfloat16)
@@ -375,12 +457,22 @@ def run_bisect(
         "dtype": dtype,
         "seq_len": seq_len,
         "seed": seed,
+        "input_mode": input_mode,
+        "input_desc": input_desc,
+        "input_rms": round(input_rms, 6),
         "bf16_rope_on_both_sides": bf16_rope,
         "first_divergent_stage": first_bad,
         "block_cosine": next(s["cosine"] for s in stages if s["stage"] == "block"),
         "stages": stages,
         "interpretation": _interpret(first_bad, dtype, bf16_rope),
     }
+    if dtype == "bf16" and input_mode == "random":
+        report["WARNING"] = (
+            f"Measured at input rms={input_rms:.3f}, but layer 0 really sees "
+            f"rms~{EMBED_RMS}. bf16 agreement is strongly scale-dependent here; "
+            f"do not cite this number as the per-layer precision floor. "
+            f"Re-run with --input real."
+        )
     if output:
         p = Path(output)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -411,10 +503,125 @@ def _interpret(first_bad: str | None, dtype: str, bf16_rope: bool) -> str:
     )
 
 
+def run_scale_sweep(
+    src_dir: str | Path,
+    *,
+    layer_idx: int = 0,
+    dtype: str = "bf16",
+    seq_len: int = 8,
+    seed: int = 0,
+    rms_values: list[float] | None = None,
+    output: str | Path | None = None,
+) -> dict[str, Any]:
+    """Re-run the bisect across input magnitudes; report block cosine vs RMS.
+
+    This is the experiment that reconciles ``bisect`` with ``trace``. If block
+    agreement collapses as the input RMS falls toward the real embedding scale
+    (~0.024), the divergence is a small-magnitude precision effect and the
+    stage table at the *low* end names where it happens. If agreement is flat,
+    the two tools disagree for some other reason and ``trace`` is the suspect.
+    """
+    rms_values = rms_values or [1.0, 0.5, 0.2, 0.1, 0.05, EMBED_RMS, 0.01]
+    rows = []
+    for r in rms_values:
+        rep = run_bisect(
+            src_dir, layer_idx=layer_idx, dtype=dtype, seq_len=seq_len,
+            seed=seed, input_mode="scaled", target_rms=r,
+        )
+        worst = min(
+            (s for s in rep["stages"] if s["stage"] != "block"),
+            key=lambda s: s["cosine"],
+        )
+        rows.append({
+            "input_rms": r,
+            "block_cosine": rep["block_cosine"],
+            "one_minus_block": round(1.0 - rep["block_cosine"], 9),
+            "worst_stage": worst["stage"],
+            "worst_stage_cosine": worst["cosine"],
+        })
+
+    real = run_bisect(
+        src_dir, layer_idx=layer_idx, dtype=dtype, seq_len=seq_len,
+        seed=seed, input_mode="real",
+    )
+    out = {
+        "layer_idx": layer_idx,
+        "dtype": dtype,
+        "sweep": rows,
+        "real_embedding": {
+            "input_rms": real["input_rms"],
+            "block_cosine": real["block_cosine"],
+            "stages": real["stages"],
+        },
+        "interpretation": _interpret_sweep(rows, real),
+    }
+    if output:
+        p = Path(output)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return out
+
+
+def _interpret_sweep(rows: list[dict], real: dict[str, Any]) -> str:
+    hi = rows[0]["one_minus_block"]
+    lo = rows[-1]["one_minus_block"]
+    ratio = (lo / hi) if hi > 0 else float("inf")
+    real_gap = 1.0 - real["block_cosine"]
+    base = (
+        f"1-cosine grows {ratio:.0f}x going from input rms=1.0 to "
+        f"rms={rows[-1]['input_rms']}. At the real embedding scale "
+        f"(rms={real['input_rms']}) the block gap is {real_gap:.3e}. "
+    )
+    if real_gap > 1e-3:
+        return base + (
+            "This reproduces the trace's layer-0 divergence and confirms it is a "
+            "small-magnitude precision effect, not a logic error. The lowest-cosine "
+            "stage in `real_embedding.stages` is where it originates -- fix or "
+            "upcast that operation."
+        )
+    if ratio < 5:
+        return base + (
+            "Agreement is essentially flat in input scale, so scale does NOT explain "
+            "the gap between this bisect (~1e-5) and the trace's layer-0 cosine of "
+            "0.925. The two tools are measuring different things: audit `trace.py` "
+            "(hook ordering, which token is sliced, whether both sides see the same "
+            "mask and dtype) before drawing any conclusion from the trace curve."
+        )
+    return base + (
+        "Scale dependence is real but does not by itself reach the trace's layer-0 "
+        "gap. Both effects are in play; widen the sweep and cross-check trace.py."
+    )
+
+
+def render_sweep_markdown(out: dict[str, Any]) -> str:
+    lines = [
+        f"# Input-scale sweep — layer {out['layer_idx']}, {out['dtype']}\n\n",
+        "| input rms | block cosine | 1-cosine | worst stage | that stage |\n",
+        "|---|---|---|---|---|\n",
+    ]
+    for r in out["sweep"]:
+        lines.append(
+            f"| {r['input_rms']} | {r['block_cosine']} | {r['one_minus_block']:.3e} "
+            f"| {r['worst_stage']} | {r['worst_stage_cosine']} |\n"
+        )
+    re_ = out["real_embedding"]
+    lines.append(
+        f"| **real embed ({re_['input_rms']})** | **{re_['block_cosine']}** | "
+        f"**{1 - re_['block_cosine']:.3e}** | — | — |\n\n"
+    )
+    lines.append(f"{out['interpretation']}\n")
+    return "".join(lines)
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     lines = [
         f"# Single-layer bisect — layer {report['layer_idx']}, {report['dtype']}\n\n",
-        f"- bf16 RoPE emulated on both sides: `{report['bf16_rope_on_both_sides']}`\n",
+        f"- input: {report.get('input_desc', 'n/a')} "
+        f"(rms={report.get('input_rms', 'n/a')})\n",
+        f"- bf16 RoPE emulated on both sides: `{report['bf16_rope_on_both_sides']}`\n",]
+    if report.get("WARNING"):
+        lines.append(f"\n> **WARNING** {report['WARNING']}\n\n")
+    lines += [
         f"- first divergent stage: **{report['first_divergent_stage'] or 'none'}**\n",
         f"- block cosine: **{report['block_cosine']}**\n\n",
         "| stage | cosine | max_abs | rel_l2 | verdict |\n|---|---|---|---|---|\n",

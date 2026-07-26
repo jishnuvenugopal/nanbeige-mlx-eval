@@ -114,44 +114,105 @@ def _gather_hf_logits(
     return ids_list, logits_list
 
 
-def rope_precision_report() -> dict[str, Any]:
-    """Quantify the RoPE-precision floor in isolation (A1).
+def _real_q_probe(src: Path) -> tuple[mx.array, str]:
+    """Build a real-activation probe for the RoPE precision check.
 
-    The HF reference downcasts cos/sin to the model dtype (bf16) before applying
-    them (``return cos.to(dtype=x.dtype)`` in the reference), while MLX computes
-    and applies RoPE in fp32. With theta = 70 000 000 and head_dim 128, almost
-    every frequency sits where ``cos ~= 1`` and bf16 spacing near 1.0 is
-    2**-8 ~= 0.4%, so the reference's downcast imposes a measurable floor on
-    *any* strict comparison against it. This measures that floor directly: the
-    reference rotate-half formula computed with fp32 cos/sin vs the same formula
-    with cos/sin cast to bf16 (the HF behavior). The observed max-abs is the
-    floor the MLX port avoids by staying in fp32.
+    Returns q at layer 0 with shape ``(1, L, n_heads, head_dim)`` in fp32 --
+    the tensor RoPE rotates -- computed as
+    ``q_proj(input_layernorm(embed_tokens(prompt)))`` and reshaped to heads.
+    Reuses the bisect shard readers (``_embed_rows`` + ``load_layer_torch``)
+    so no full model is loaded. Layout matches the cos/sin broadcast in
+    ``rope_precision_report`` (L, H, head_dim); RoPE is layout-agnostic as
+    long as cos/sin and x agree.
+    """
+    import json
+
+    from .bisect import _embed_rows, load_layer_torch
+
+    from transformers import AutoTokenizer  # type: ignore
+
+    cfg = json.loads((src / "config.json").read_text(encoding="utf-8"))
+    tok = AutoTokenizer.from_pretrained(str(src), trust_remote_code=True)
+    ids = tok.encode("The capital of France is", add_special_tokens=False)
+    L = len(ids)
+    nh, hd = cfg["num_attention_heads"], cfg["head_dim"]
+    eps = float(cfg["rms_norm_eps"])
+
+    import torch  # type: ignore
+
+    emb = _embed_rows(src, ids)                      # (L, H), fp32 numpy
+    w = load_layer_torch(src, 0, "fp32")
+    x = torch.from_numpy(emb).to(torch.float32)[None]   # (1, L, H)
+
+    def rms(t, weight):
+        v = t.pow(2).mean(-1, keepdim=True)
+        return weight * (t * torch.rsqrt(v + eps))
+    xn = rms(x, w["input_layernorm.weight"])          # input_layernorm, fp32
+    q = torch.nn.functional.linear(xn, w["self_attn.q_proj.weight"])  # (1, L, nh*hd)
+    q = q.view(1, L, nh, hd)                           # (1, L, nh, hd)
+    q_mx = mx.array(q.contiguous().to(torch.float32).numpy())
+    return q_mx, f"real q at layer 0 ({L} tokens, {nh} heads, head_dim {hd})"
+
+
+def rope_precision_report(src: str | Path | None = None) -> dict[str, Any]:
+    """Quantify the RoPE-precision floor in isolation -- isolated to cos/sin.
+
+    What this measures and what it does NOT measure:
+
+    * The HF reference downcasts cos/sin to bf16 (``return cos.to(dtype=x.dtype)``)
+      before applying them; MLX keeps RoPE in fp32. With theta = 70 000 000 and
+      head_dim 128, almost every frequency sits where ``cos ~= 1`` and bf16
+      spacing near 1.0 is 2**-8 ~= 0.4%, so that downcast is a real floor.
+    * The delta reported here is **only** the cos/sin-downcast effect. The
+      previous version also rounded the probe x and did the multiply/add in bf16,
+      which conflated three effects under one label. The reference keeps q in its
+      compute dtype either way, so x-rounding is common-mode and must not appear
+      in the delta. Here ``round_trig`` flips *only* the cos/sin bf16 downcast;
+      x stays fp32 throughout both branches.
+
+    Convention: precision measurements use real activations; only logic checks
+    may use synthetic input. ``x`` below is the real ``q_proj(input_layernorm(
+    embed_tokens))`` at layer 0, read straight from the shards -- no RNG in this
+    path, so the metric is reproducible by construction (not by seeding).
     """
     head_dim = 128
     base = 70_000_000.0
-    L, H = 8, 2
-    x = mx.random.normal((1, L, H, head_dim))
     offset = 3
     half = head_dim // 2
+
+    if src is not None:
+        x, x_desc = _real_q_probe(Path(src))
+        # probe layout is (1, L, H, head_dim)
+        L, H = x.shape[1], x.shape[2]
+    else:
+        # No src provided (e.g. unit test): deterministic fallback so the function
+        # stays callable. Never used by the parity report, which always passes src.
+        L, H = 8, 2
+        mx.random.seed(0)
+        x = mx.random.normal((1, L, H, head_dim))
+        x_desc = f"fallback probe (seeded, NOT real q): {H} heads, L={L}"
 
     def rotate_half(t):
         t1, t2 = t[..., :half], t[..., half:]
         return mx.concatenate([-t2, t1], axis=-1)
 
-    def ref_rope(x_in, trig_dtype):
+    def ref_rope(x_in, *, round_trig):
+        # positions and frequencies are identical on both sides; only the
+        # trig dtype differs. x_in is NEVER cast here -- that is the whole point.
         pos = mx.arange(offset, offset + L).astype(mx.float32)
         inv_freq = 1.0 / (base ** (mx.arange(0, half).astype(mx.float32) / half))
-        freqs = mx.outer(pos, inv_freq)                  # (L, half)
-        emb = mx.concatenate([freqs, freqs], axis=-1)    # (L, head_dim)
-        cos = mx.cos(emb).astype(trig_dtype)[:, None, :]  # broadcast over heads
-        sin = mx.sin(emb).astype(trig_dtype)[:, None, :]
-        cos = mx.broadcast_to(cos, (L, H, head_dim))[None]
-        sin = mx.broadcast_to(sin, (L, H, head_dim))[None]
-        x_t = x_in.astype(trig_dtype)
-        return (x_t * cos + rotate_half(x_t) * sin).astype(mx.float32)
+        freqs = mx.outer(pos, inv_freq)                 # (L, half)
+        emb = mx.concatenate([freqs, freqs], axis=-1)   # (L, head_dim)
+        cos, sin = mx.cos(emb), mx.sin(emb)
+        if round_trig:                                  # emulate HF cos.to(bf16), nothing else
+            cos = cos.astype(mx.bfloat16).astype(mx.float32)
+            sin = sin.astype(mx.bfloat16).astype(mx.float32)
+        cos = mx.broadcast_to(cos[:, None, :], (L, H, head_dim))[None]
+        sin = mx.broadcast_to(sin[:, None, :], (L, H, head_dim))[None]
+        return x_in * cos + rotate_half(x_in) * sin     # x stays fp32 throughout
 
-    a = ref_rope(x, mx.float32)        # reference, fp32 cos/sin (the ground truth)
-    b = ref_rope(x, mx.bfloat16)       # reference, bf16 cos/sin (what HF actually does)
+    a = ref_rope(x, round_trig=False)   # ground truth: fp32 cos/sin
+    b = ref_rope(x, round_trig=True)    # HF behavior: bf16 cos/sin, x unchanged
 
     def stats(u, v):
         u_l = u.reshape(-1).tolist()
@@ -161,17 +222,27 @@ def rope_precision_report() -> dict[str, Any]:
         nv = math.sqrt(sum(q * q for q in v_l))
         cos = dot / (nu * nv + 1e-12)
         m = max(abs(p - q) for p, q in zip(u_l, v_l))
-        return {"cosine": round(cos, 6), "max_abs": round(m, 6)}
+        return {
+            "cosine": round(cos, 6),
+            "max_abs": round(m, 6),
+            # absolute max_abs is scale-dependent; report it relative to ||q||
+            # so the number is interpretable without knowing the probe magnitude.
+            "max_abs_rel": round(m / (nu / math.sqrt(len(u_l)) + 1e-12), 6),
+            "probe_rms": round(nu / math.sqrt(len(u_l)), 6),
+        }
 
     s = stats(a, b)
     return {
+        "probe": x_desc,
         "reference_fp32_cos_vs_bf16_cos": s,
         "interpretation": (
-            f"This is the floor imposed by the HF reference's bf16 cos/sin "
-            f"downcast (max_abs={s['max_abs']}). MLX computes RoPE in fp32 and "
-            "avoids it, so the port is more accurate than the reference at this "
-            "step. Any strict logit comparison against the bf16 reference "
-            "inherits roughly this floor from the reference side."
+            f"Floor imposed by the HF reference's bf16 cos/sin downcast only "
+            f"(x held in fp32 on both sides; the bf16 branch rounds cos/sin "
+            f"exclusively). max_abs={s['max_abs']} ({s['max_abs_rel']} of probe "
+            f"RMS {s['probe_rms']}). MLX computes RoPE in fp32 and avoids this, "
+            "so the port is more accurate than the reference at this step; any "
+            "strict logit comparison against the bf16 reference inherits roughly "
+            "this floor from the reference side."
         ),
     }
 
@@ -199,9 +270,11 @@ def run_parity(
     *,
     device: str = "cpu",
     dtype: str = "bf16",
+    seed: int = 0,
 ) -> dict[str, Any]:
     """Run the fidelity comparison and (optionally) persist a JSON report."""
     prompts = prompts or DEFAULT_PROMPTS
+    mx.random.seed(seed)
 
     ids_list, hf_logits = _gather_hf_logits(src_dir, prompts, device=device, dtype=dtype)
     mlx_model = load_mlx_bf16(src_dir)
@@ -244,6 +317,7 @@ def run_parity(
         "n_prompts": n,
         "device": device,
         "dtype": dtype,
+        "seed": seed,
         "frameworks": {"reference": f"transformers ({device})", "port": "mlx"},
         "top1_agreement_rate": round(top1_agree / n, 4),
         "mean_cosine": round(sum(cosines) / n, 6),
@@ -251,7 +325,7 @@ def run_parity(
         "mean_max_abs_logit": round(sum(max_abs) / n, 4),
         "mean_kl": round(sum(kls) / n, 6),
         "per_prompt": per_prompt,
-        "rope_precision": rope_precision_report(),
+        "rope_precision": rope_precision_report(src_dir),
         "interpretation": (
             "High top-1 agreement and logit cosine ≈ 1 indicate a faithful port. "
             "NOTE: the CPU run did NOT clear 0.99 — moving off MPS changed nothing "
