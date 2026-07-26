@@ -1,0 +1,82 @@
+name: Bug report
+description: Report a problem with the MLX port, conversion, eval harness, or a published result
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report. Most contributions to this
+        project do **not** need the ~8 GB model — see `CONTRIBUTING.md`. The more
+        of the below you fill in, the faster this resolves.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Conversion (HF → MLX quant)
+        - MLX port (model.py / inference)
+        - Eval harness (run / grade / report)
+        - Fidelity tooling (parity / trace / bisect / crosscheck)
+        - Published result number doesn't reproduce
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: versions_eval
+    attributes:
+      label: nanbeige-mlx-eval version
+      placeholder: "0.2.0"
+      description: "Output of `nanbeige-mlx-eval --help` shows it, or `pip show nanbeige-mlx-eval`."
+    validations:
+      required: true
+
+  - type: input
+    id: versions_mlx
+    attributes:
+      label: mlx.core version
+      placeholder: "0.32.0"
+      description: "Run `python -c 'import mlx.core as mx; print(mx.__version__)'`."
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: "macOS 15, M1 Pro, 16 GB"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: "The exact command(s) you ran."
+      render: shell
+      placeholder: "nanbeige-mlx-eval parity --src models/nanbeige42-hf --device cpu --dtype bf16"
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output / error
+      description: "Full output, including the traceback. For conversion failures, the complete `mlx-nanbeige-convert` log."
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: "Relevant: HF model revision, quant (4/6/8-bit), suite name, run dir under benchmark_results/, anything else."

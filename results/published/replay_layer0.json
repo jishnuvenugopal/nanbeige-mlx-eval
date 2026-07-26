@@ -1,0 +1,103 @@
+{
+  "src": "models/nanbeige42-hf",
+  "prompt": "The capital of France is",
+  "dtype": "bf16",
+  "n_tokens": 5,
+  "object_comparison": {
+    "inmodel_attention_class": "NanbeigeAttention",
+    "standalone_attention_class": "NanbeigeAttention",
+    "inmodel_rope_inv_freq_dtype": "torch.float32",
+    "standalone_rope_inv_freq_dtype": "torch.bfloat16"
+  },
+  "captured_call": {
+    "positional": [
+      {
+        "type": "Tensor",
+        "shape": [
+          1,
+          5,
+          3072
+        ],
+        "dtype": "torch.bfloat16",
+        "min": -0.777344,
+        "max": 0.507812,
+        "mean": -1.6e-05
+      }
+    ],
+    "keyword": {
+      "attention_mask": {
+        "type": "Tensor",
+        "shape": [
+          1,
+          1,
+          5,
+          6
+        ],
+        "dtype": "torch.bfloat16",
+        "min": -3.3895313892515355e+38,
+        "max": -0.0,
+        "mean": -Infinity
+      },
+      "position_ids": {
+        "type": "Tensor",
+        "shape": [
+          1,
+          5
+        ],
+        "dtype": "torch.int64",
+        "min": 0.0,
+        "max": 4.0,
+        "mean": 2.0
+      },
+      "past_key_value": null,
+      "output_attentions": false,
+      "use_cache": false,
+      "cache_position": {
+        "type": "Tensor",
+        "shape": [
+          5
+        ],
+        "dtype": "torch.int64",
+        "min": 0.0,
+        "max": 4.0,
+        "mean": 2.0
+      },
+      "loop_idx": 0,
+      "loop_cache_layer_idx": null,
+      "mhc_loop_idx": null,
+      "loop_share_kv_cache": null,
+      "depth_attention_kv_cache": null
+    }
+  },
+  "pairs": [
+    {
+      "pair": "D_inmodel vs B_standalone",
+      "cosine": 0.92506854,
+      "max_abs": 4.5,
+      "rms_a": 0.559223,
+      "rms_b": 0.655962
+    },
+    {
+      "pair": "D_inmodel vs R_sameobj_modelargs",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.559223,
+      "rms_b": 0.559223
+    },
+    {
+      "pair": "D_inmodel vs H_sameobj_handargs",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.559223,
+      "rms_b": 0.559223
+    },
+    {
+      "pair": "B_standalone vs H_sameobj_handargs",
+      "cosine": 0.92506854,
+      "max_abs": 4.5,
+      "rms_a": 0.655962,
+      "rms_b": 0.559223
+    }
+  ],
+  "verdict": "OBJECT, NOT ARGUMENTS. The same layer object returns D with the model's args (cos=1.000000) AND with the bisect's hand-built args (cos=1.000000) -- so the arguments are equivalent and irrelevant. The standalone layer still differs (cos=0.925069), so the fault is in how `_real_layer_stages` CONSTRUCTS the layer. Object differences found: rotary inv_freq dtype torch.float32 (in-model) vs torch.bfloat16 (standalone) -- `.to(bfloat16)` casts non-persistent buffers, and inv_freq spans 1.0 down to ~2e-8, so bf16 mangles the low frequencies. NOTE the mask shape is a red herring: the model's [1,1,L,L+1] comes from HF's `past_seen_tokens + sequence_length + 1` boilerplate, and eager attention slices it to [:, :, :, :L] before use."
+}

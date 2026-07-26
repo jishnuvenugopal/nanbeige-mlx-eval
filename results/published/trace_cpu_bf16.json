@@ -1,0 +1,633 @@
+{
+  "n_prompts": 1,
+  "device": "cpu",
+  "dtype": "bf16",
+  "n_effective_layers": 44,
+  "aggregated": [
+    {
+      "effective_layer": 0,
+      "loop": 0,
+      "layer": 0,
+      "mean_cosine": 0.925086,
+      "min_cosine": 0.925086
+    },
+    {
+      "effective_layer": 1,
+      "loop": 0,
+      "layer": 1,
+      "mean_cosine": 0.868198,
+      "min_cosine": 0.868198
+    },
+    {
+      "effective_layer": 2,
+      "loop": 0,
+      "layer": 2,
+      "mean_cosine": 0.844105,
+      "min_cosine": 0.844105
+    },
+    {
+      "effective_layer": 3,
+      "loop": 0,
+      "layer": 3,
+      "mean_cosine": 0.834012,
+      "min_cosine": 0.834012
+    },
+    {
+      "effective_layer": 4,
+      "loop": 0,
+      "layer": 4,
+      "mean_cosine": 0.850036,
+      "min_cosine": 0.850036
+    },
+    {
+      "effective_layer": 5,
+      "loop": 0,
+      "layer": 5,
+      "mean_cosine": 0.86985,
+      "min_cosine": 0.86985
+    },
+    {
+      "effective_layer": 6,
+      "loop": 0,
+      "layer": 6,
+      "mean_cosine": 0.874764,
+      "min_cosine": 0.874764
+    },
+    {
+      "effective_layer": 7,
+      "loop": 0,
+      "layer": 7,
+      "mean_cosine": 0.884201,
+      "min_cosine": 0.884201
+    },
+    {
+      "effective_layer": 8,
+      "loop": 0,
+      "layer": 8,
+      "mean_cosine": 0.865722,
+      "min_cosine": 0.865722
+    },
+    {
+      "effective_layer": 9,
+      "loop": 0,
+      "layer": 9,
+      "mean_cosine": 0.893587,
+      "min_cosine": 0.893587
+    },
+    {
+      "effective_layer": 10,
+      "loop": 0,
+      "layer": 10,
+      "mean_cosine": 0.885131,
+      "min_cosine": 0.885131
+    },
+    {
+      "effective_layer": 11,
+      "loop": 0,
+      "layer": 11,
+      "mean_cosine": 0.864377,
+      "min_cosine": 0.864377
+    },
+    {
+      "effective_layer": 12,
+      "loop": 0,
+      "layer": 12,
+      "mean_cosine": 0.893722,
+      "min_cosine": 0.893722
+    },
+    {
+      "effective_layer": 13,
+      "loop": 0,
+      "layer": 13,
+      "mean_cosine": 0.896411,
+      "min_cosine": 0.896411
+    },
+    {
+      "effective_layer": 14,
+      "loop": 0,
+      "layer": 14,
+      "mean_cosine": 0.885724,
+      "min_cosine": 0.885724
+    },
+    {
+      "effective_layer": 15,
+      "loop": 0,
+      "layer": 15,
+      "mean_cosine": 0.891737,
+      "min_cosine": 0.891737
+    },
+    {
+      "effective_layer": 16,
+      "loop": 0,
+      "layer": 16,
+      "mean_cosine": 0.894946,
+      "min_cosine": 0.894946
+    },
+    {
+      "effective_layer": 17,
+      "loop": 0,
+      "layer": 17,
+      "mean_cosine": 0.914989,
+      "min_cosine": 0.914989
+    },
+    {
+      "effective_layer": 18,
+      "loop": 0,
+      "layer": 18,
+      "mean_cosine": 0.917491,
+      "min_cosine": 0.917491
+    },
+    {
+      "effective_layer": 19,
+      "loop": 0,
+      "layer": 19,
+      "mean_cosine": 0.944553,
+      "min_cosine": 0.944553
+    },
+    {
+      "effective_layer": 20,
+      "loop": 0,
+      "layer": 20,
+      "mean_cosine": 0.956113,
+      "min_cosine": 0.956113
+    },
+    {
+      "effective_layer": 21,
+      "loop": 0,
+      "layer": 21,
+      "mean_cosine": 0.996997,
+      "min_cosine": 0.996997
+    },
+    {
+      "effective_layer": 22,
+      "loop": 1,
+      "layer": 0,
+      "mean_cosine": 0.895187,
+      "min_cosine": 0.895187
+    },
+    {
+      "effective_layer": 23,
+      "loop": 1,
+      "layer": 1,
+      "mean_cosine": 0.905674,
+      "min_cosine": 0.905674
+    },
+    {
+      "effective_layer": 24,
+      "loop": 1,
+      "layer": 2,
+      "mean_cosine": 0.91806,
+      "min_cosine": 0.91806
+    },
+    {
+      "effective_layer": 25,
+      "loop": 1,
+      "layer": 3,
+      "mean_cosine": 0.932015,
+      "min_cosine": 0.932015
+    },
+    {
+      "effective_layer": 26,
+      "loop": 1,
+      "layer": 4,
+      "mean_cosine": 0.935324,
+      "min_cosine": 0.935324
+    },
+    {
+      "effective_layer": 27,
+      "loop": 1,
+      "layer": 5,
+      "mean_cosine": 0.933761,
+      "min_cosine": 0.933761
+    },
+    {
+      "effective_layer": 28,
+      "loop": 1,
+      "layer": 6,
+      "mean_cosine": 0.937005,
+      "min_cosine": 0.937005
+    },
+    {
+      "effective_layer": 29,
+      "loop": 1,
+      "layer": 7,
+      "mean_cosine": 0.940813,
+      "min_cosine": 0.940813
+    },
+    {
+      "effective_layer": 30,
+      "loop": 1,
+      "layer": 8,
+      "mean_cosine": 0.93951,
+      "min_cosine": 0.93951
+    },
+    {
+      "effective_layer": 31,
+      "loop": 1,
+      "layer": 9,
+      "mean_cosine": 0.950289,
+      "min_cosine": 0.950289
+    },
+    {
+      "effective_layer": 32,
+      "loop": 1,
+      "layer": 10,
+      "mean_cosine": 0.954206,
+      "min_cosine": 0.954206
+    },
+    {
+      "effective_layer": 33,
+      "loop": 1,
+      "layer": 11,
+      "mean_cosine": 0.943642,
+      "min_cosine": 0.943642
+    },
+    {
+      "effective_layer": 34,
+      "loop": 1,
+      "layer": 12,
+      "mean_cosine": 0.949983,
+      "min_cosine": 0.949983
+    },
+    {
+      "effective_layer": 35,
+      "loop": 1,
+      "layer": 13,
+      "mean_cosine": 0.961956,
+      "min_cosine": 0.961956
+    },
+    {
+      "effective_layer": 36,
+      "loop": 1,
+      "layer": 14,
+      "mean_cosine": 0.961616,
+      "min_cosine": 0.961616
+    },
+    {
+      "effective_layer": 37,
+      "loop": 1,
+      "layer": 15,
+      "mean_cosine": 0.964363,
+      "min_cosine": 0.964363
+    },
+    {
+      "effective_layer": 38,
+      "loop": 1,
+      "layer": 16,
+      "mean_cosine": 0.969714,
+      "min_cosine": 0.969714
+    },
+    {
+      "effective_layer": 39,
+      "loop": 1,
+      "layer": 17,
+      "mean_cosine": 0.973018,
+      "min_cosine": 0.973018
+    },
+    {
+      "effective_layer": 40,
+      "loop": 1,
+      "layer": 18,
+      "mean_cosine": 0.974891,
+      "min_cosine": 0.974891
+    },
+    {
+      "effective_layer": 41,
+      "loop": 1,
+      "layer": 19,
+      "mean_cosine": 0.97462,
+      "min_cosine": 0.97462
+    },
+    {
+      "effective_layer": 42,
+      "loop": 1,
+      "layer": 20,
+      "mean_cosine": 0.979192,
+      "min_cosine": 0.979192
+    },
+    {
+      "effective_layer": 43,
+      "loop": 1,
+      "layer": 21,
+      "mean_cosine": 0.980421,
+      "min_cosine": 0.980421
+    }
+  ],
+  "per_prompt": [
+    {
+      "prompt": "The capital of France is",
+      "n_layers": 44,
+      "layers": [
+        {
+          "effective_layer": 0,
+          "loop": 0,
+          "layer": 0,
+          "cosine": 0.925086,
+          "max_abs": 4.5
+        },
+        {
+          "effective_layer": 1,
+          "loop": 0,
+          "layer": 1,
+          "cosine": 0.868198,
+          "max_abs": 4.9375
+        },
+        {
+          "effective_layer": 2,
+          "loop": 0,
+          "layer": 2,
+          "cosine": 0.844105,
+          "max_abs": 3.9375
+        },
+        {
+          "effective_layer": 3,
+          "loop": 0,
+          "layer": 3,
+          "cosine": 0.834012,
+          "max_abs": 5.125
+        },
+        {
+          "effective_layer": 4,
+          "loop": 0,
+          "layer": 4,
+          "cosine": 0.850036,
+          "max_abs": 3.875
+        },
+        {
+          "effective_layer": 5,
+          "loop": 0,
+          "layer": 5,
+          "cosine": 0.86985,
+          "max_abs": 3.0234
+        },
+        {
+          "effective_layer": 6,
+          "loop": 0,
+          "layer": 6,
+          "cosine": 0.874764,
+          "max_abs": 2.8828
+        },
+        {
+          "effective_layer": 7,
+          "loop": 0,
+          "layer": 7,
+          "cosine": 0.884201,
+          "max_abs": 3.3203
+        },
+        {
+          "effective_layer": 8,
+          "loop": 0,
+          "layer": 8,
+          "cosine": 0.865722,
+          "max_abs": 3.25
+        },
+        {
+          "effective_layer": 9,
+          "loop": 0,
+          "layer": 9,
+          "cosine": 0.893587,
+          "max_abs": 3.3125
+        },
+        {
+          "effective_layer": 10,
+          "loop": 0,
+          "layer": 10,
+          "cosine": 0.885131,
+          "max_abs": 4.75
+        },
+        {
+          "effective_layer": 11,
+          "loop": 0,
+          "layer": 11,
+          "cosine": 0.864377,
+          "max_abs": 5.5
+        },
+        {
+          "effective_layer": 12,
+          "loop": 0,
+          "layer": 12,
+          "cosine": 0.893722,
+          "max_abs": 4.8203
+        },
+        {
+          "effective_layer": 13,
+          "loop": 0,
+          "layer": 13,
+          "cosine": 0.896411,
+          "max_abs": 5.5234
+        },
+        {
+          "effective_layer": 14,
+          "loop": 0,
+          "layer": 14,
+          "cosine": 0.885724,
+          "max_abs": 6.7344
+        },
+        {
+          "effective_layer": 15,
+          "loop": 0,
+          "layer": 15,
+          "cosine": 0.891737,
+          "max_abs": 6.9688
+        },
+        {
+          "effective_layer": 16,
+          "loop": 0,
+          "layer": 16,
+          "cosine": 0.894946,
+          "max_abs": 14.25
+        },
+        {
+          "effective_layer": 17,
+          "loop": 0,
+          "layer": 17,
+          "cosine": 0.914989,
+          "max_abs": 14.0
+        },
+        {
+          "effective_layer": 18,
+          "loop": 0,
+          "layer": 18,
+          "cosine": 0.917491,
+          "max_abs": 17.25
+        },
+        {
+          "effective_layer": 19,
+          "loop": 0,
+          "layer": 19,
+          "cosine": 0.944553,
+          "max_abs": 17.5
+        },
+        {
+          "effective_layer": 20,
+          "loop": 0,
+          "layer": 20,
+          "cosine": 0.956113,
+          "max_abs": 19.0
+        },
+        {
+          "effective_layer": 21,
+          "loop": 0,
+          "layer": 21,
+          "cosine": 0.996997,
+          "max_abs": 64.0
+        },
+        {
+          "effective_layer": 22,
+          "loop": 1,
+          "layer": 0,
+          "cosine": 0.895187,
+          "max_abs": 1.4375
+        },
+        {
+          "effective_layer": 23,
+          "loop": 1,
+          "layer": 1,
+          "cosine": 0.905674,
+          "max_abs": 1.3281
+        },
+        {
+          "effective_layer": 24,
+          "loop": 1,
+          "layer": 2,
+          "cosine": 0.91806,
+          "max_abs": 2.0391
+        },
+        {
+          "effective_layer": 25,
+          "loop": 1,
+          "layer": 3,
+          "cosine": 0.932015,
+          "max_abs": 2.1953
+        },
+        {
+          "effective_layer": 26,
+          "loop": 1,
+          "layer": 4,
+          "cosine": 0.935324,
+          "max_abs": 2.1719
+        },
+        {
+          "effective_layer": 27,
+          "loop": 1,
+          "layer": 5,
+          "cosine": 0.933761,
+          "max_abs": 2.1641
+        },
+        {
+          "effective_layer": 28,
+          "loop": 1,
+          "layer": 6,
+          "cosine": 0.937005,
+          "max_abs": 4.0
+        },
+        {
+          "effective_layer": 29,
+          "loop": 1,
+          "layer": 7,
+          "cosine": 0.940813,
+          "max_abs": 6.25
+        },
+        {
+          "effective_layer": 30,
+          "loop": 1,
+          "layer": 8,
+          "cosine": 0.93951,
+          "max_abs": 5.5
+        },
+        {
+          "effective_layer": 31,
+          "loop": 1,
+          "layer": 9,
+          "cosine": 0.950289,
+          "max_abs": 5.5
+        },
+        {
+          "effective_layer": 32,
+          "loop": 1,
+          "layer": 10,
+          "cosine": 0.954206,
+          "max_abs": 6.25
+        },
+        {
+          "effective_layer": 33,
+          "loop": 1,
+          "layer": 11,
+          "cosine": 0.943642,
+          "max_abs": 5.75
+        },
+        {
+          "effective_layer": 34,
+          "loop": 1,
+          "layer": 12,
+          "cosine": 0.949983,
+          "max_abs": 8.25
+        },
+        {
+          "effective_layer": 35,
+          "loop": 1,
+          "layer": 13,
+          "cosine": 0.961956,
+          "max_abs": 6.5
+        },
+        {
+          "effective_layer": 36,
+          "loop": 1,
+          "layer": 14,
+          "cosine": 0.961616,
+          "max_abs": 4.0898
+        },
+        {
+          "effective_layer": 37,
+          "loop": 1,
+          "layer": 15,
+          "cosine": 0.964363,
+          "max_abs": 5.0
+        },
+        {
+          "effective_layer": 38,
+          "loop": 1,
+          "layer": 16,
+          "cosine": 0.969714,
+          "max_abs": 6.5
+        },
+        {
+          "effective_layer": 39,
+          "loop": 1,
+          "layer": 17,
+          "cosine": 0.973018,
+          "max_abs": 7.0
+        },
+        {
+          "effective_layer": 40,
+          "loop": 1,
+          "layer": 18,
+          "cosine": 0.974891,
+          "max_abs": 15.0
+        },
+        {
+          "effective_layer": 41,
+          "loop": 1,
+          "layer": 19,
+          "cosine": 0.97462,
+          "max_abs": 8.0
+        },
+        {
+          "effective_layer": 42,
+          "loop": 1,
+          "layer": 20,
+          "cosine": 0.979192,
+          "max_abs": 12.0
+        },
+        {
+          "effective_layer": 43,
+          "loop": 1,
+          "layer": 21,
+          "cosine": 0.980421,
+          "max_abs": 35.0
+        }
+      ]
+    }
+  ],
+  "interpretation": "Per-layer cosine is non-monotone: it is worst at the smallest residual magnitudes (L0, and the first layer after the loop-boundary norm that rescales a small residual) and recovers as the residual stream grows. This is the signature of a near-constant absolute per-layer error diluted by growing residual norm -- not monotone bf16 drift, which cannot improve over 18 of 22 layers. The single ~0.10 step at the loop boundary (effective layer 21 -> 22) coincides with `self.norm`. A single-layer fp32 bisect (`bisect --dtype fp32`) distinguishes logic from numerics; until that is run, do not attribute this curve to precision."
+}

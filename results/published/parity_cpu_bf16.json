@@ -1,0 +1,82 @@
+{
+  "n_prompts": 6,
+  "device": "cpu",
+  "dtype": "bf16",
+  "seed": 0,
+  "frameworks": {
+    "reference": "transformers (cpu)",
+    "port": "mlx"
+  },
+  "top1_agreement_rate": 0.8333,
+  "mean_cosine": 0.846566,
+  "min_cosine": 0.589533,
+  "mean_max_abs_logit": 10.1497,
+  "mean_kl": 2.055967,
+  "per_prompt": [
+    {
+      "prompt_len": 5,
+      "top1_agree": true,
+      "cosine": 0.991786,
+      "max_abs_logit": 3.625,
+      "kl_p_to_q": 0.130715,
+      "top1_hf": 9965,
+      "top1_mlx": 9965
+    },
+    {
+      "prompt_len": 11,
+      "top1_agree": true,
+      "cosine": 0.591017,
+      "max_abs_logit": 18.3154,
+      "kl_p_to_q": 5.602615,
+      "top1_hf": 13,
+      "top1_mlx": 13
+    },
+    {
+      "prompt_len": 3,
+      "top1_agree": false,
+      "cosine": 0.589533,
+      "max_abs_logit": 9.6562,
+      "kl_p_to_q": 2.145067,
+      "top1_hf": 152441,
+      "top1_mlx": 153116
+    },
+    {
+      "prompt_len": 10,
+      "top1_agree": true,
+      "cosine": 0.975132,
+      "max_abs_logit": 14.3438,
+      "kl_p_to_q": 0.54135,
+      "top1_hf": 13,
+      "top1_mlx": 13
+    },
+    {
+      "prompt_len": 20,
+      "top1_agree": true,
+      "cosine": 0.958334,
+      "max_abs_logit": 9.1455,
+      "kl_p_to_q": 1.994883,
+      "top1_hf": 13,
+      "top1_mlx": 13
+    },
+    {
+      "prompt_len": 6,
+      "top1_agree": true,
+      "cosine": 0.973594,
+      "max_abs_logit": 5.8125,
+      "kl_p_to_q": 1.921175,
+      "top1_hf": 13,
+      "top1_mlx": 13
+    }
+  ],
+  "rope_precision": {
+    "probe": "real q at layer 0 (5 tokens, 48 heads, head_dim 128)",
+    "reference_fp32_cos_vs_bf16_cos": {
+      "cosine": 1.0,
+      "max_abs": 0.011297,
+      "max_abs_rel": 0.007806,
+      "probe_rms": 1.447217
+    },
+    "interpretation": "Floor imposed by the HF reference's bf16 cos/sin downcast only (x held in fp32 on both sides; the bf16 branch rounds cos/sin exclusively). max_abs=0.011297 (0.007806 of probe RMS 1.447217). MLX computes RoPE in fp32 and avoids this, so the port is more accurate than the reference at this step; any strict logit comparison against the bf16 reference inherits roughly this floor from the reference side."
+  },
+  "interpretation": "High top-1 agreement and logit cosine \u2248 1 indicate a faithful port. NOTE: the CPU run did NOT clear 0.99 \u2014 moving off MPS changed nothing (0.847 vs 0.844), so device numerics are ruled out as the cause. Do not read this number as settled; run `bisect --dtype fp32` before attributing the gap to precision (see rope_precision for the known bf16 floor). Bit-exact equality is not expected."
+}

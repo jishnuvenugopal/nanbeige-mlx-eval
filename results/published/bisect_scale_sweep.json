@@ -1,0 +1,174 @@
+{
+  "layer_idx": 0,
+  "dtype": "bf16",
+  "sweep": [
+    {
+      "input_rms": 1.0,
+      "block_cosine": 0.99999402,
+      "one_minus_block": 5.98e-06,
+      "worst_stage": "down_proj",
+      "worst_stage_cosine": 0.99998173
+    },
+    {
+      "input_rms": 0.5,
+      "block_cosine": 0.99998771,
+      "one_minus_block": 1.229e-05,
+      "worst_stage": "swiglu",
+      "worst_stage_cosine": 0.99997499
+    },
+    {
+      "input_rms": 0.2,
+      "block_cosine": 0.9999792,
+      "one_minus_block": 2.08e-05,
+      "worst_stage": "swiglu",
+      "worst_stage_cosine": 0.99996509
+    },
+    {
+      "input_rms": 0.1,
+      "block_cosine": 0.99997704,
+      "one_minus_block": 2.296e-05,
+      "worst_stage": "swiglu",
+      "worst_stage_cosine": 0.99996318
+    },
+    {
+      "input_rms": 0.05,
+      "block_cosine": 0.99997518,
+      "one_minus_block": 2.482e-05,
+      "worst_stage": "swiglu",
+      "worst_stage_cosine": 0.99995905
+    },
+    {
+      "input_rms": 0.024,
+      "block_cosine": 0.99997669,
+      "one_minus_block": 2.331e-05,
+      "worst_stage": "swiglu",
+      "worst_stage_cosine": 0.99996385
+    },
+    {
+      "input_rms": 0.01,
+      "block_cosine": 0.99997499,
+      "one_minus_block": 2.501e-05,
+      "worst_stage": "swiglu",
+      "worst_stage_cosine": 0.99995892
+    }
+  ],
+  "real_embedding": {
+    "input_rms": 0.027207,
+    "block_cosine": 0.99999304,
+    "stages": [
+      {
+        "stage": "input_layernorm",
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "rel_l2": 0.0,
+        "norm_ref": 43.9506,
+        "verdict": "ok"
+      },
+      {
+        "stage": "q_proj",
+        "cosine": 1.0,
+        "max_abs": 0.007812,
+        "rel_l2": 5.582e-05,
+        "norm_ref": 253.6954,
+        "verdict": "ok"
+      },
+      {
+        "stage": "k_proj",
+        "cosine": 1.0,
+        "max_abs": 1.5e-05,
+        "rel_l2": 9e-08,
+        "norm_ref": 167.1708,
+        "verdict": "ok"
+      },
+      {
+        "stage": "v_proj",
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "rel_l2": 0.0,
+        "norm_ref": 24.5705,
+        "verdict": "ok"
+      },
+      {
+        "stage": "rope_q",
+        "cosine": 0.99999891,
+        "max_abs": 0.03125,
+        "rel_l2": 0.00147571,
+        "norm_ref": 253.6949,
+        "verdict": "ok"
+      },
+      {
+        "stage": "rope_k",
+        "cosine": 0.9999996,
+        "max_abs": 0.03125,
+        "rel_l2": 0.00089155,
+        "norm_ref": 167.1702,
+        "verdict": "ok"
+      },
+      {
+        "stage": "attn_out",
+        "cosine": 0.99999307,
+        "max_abs": 0.015625,
+        "rel_l2": 0.00372418,
+        "norm_ref": 42.904,
+        "verdict": "ok"
+      },
+      {
+        "stage": "o_proj",
+        "cosine": 0.99999378,
+        "max_abs": 0.125,
+        "rel_l2": 0.00356105,
+        "norm_ref": 70.4566,
+        "verdict": "ok"
+      },
+      {
+        "stage": "post_attention_layernorm",
+        "cosine": 0.9999882,
+        "max_abs": 0.007812,
+        "rel_l2": 0.00486754,
+        "norm_ref": 26.1486,
+        "verdict": "ok"
+      },
+      {
+        "stage": "gate_proj",
+        "cosine": 0.99999011,
+        "max_abs": 0.019531,
+        "rel_l2": 0.00445016,
+        "norm_ref": 111.7571,
+        "verdict": "ok"
+      },
+      {
+        "stage": "up_proj",
+        "cosine": 0.9999863,
+        "max_abs": 0.015625,
+        "rel_l2": 0.00523803,
+        "norm_ref": 80.9818,
+        "verdict": "ok"
+      },
+      {
+        "stage": "swiglu",
+        "cosine": 0.99998012,
+        "max_abs": 0.023438,
+        "rel_l2": 0.00630904,
+        "norm_ref": 21.77,
+        "verdict": "ok"
+      },
+      {
+        "stage": "down_proj",
+        "cosine": 0.99998405,
+        "max_abs": 0.0625,
+        "rel_l2": 0.00566004,
+        "norm_ref": 42.4991,
+        "verdict": "ok"
+      },
+      {
+        "stage": "block",
+        "cosine": 0.99999304,
+        "max_abs": 0.125,
+        "rel_l2": 0.00374549,
+        "norm_ref": 92.8269,
+        "verdict": "ok"
+      }
+    ]
+  },
+  "interpretation": "1-cosine grows 4x going from input rms=1.0 to rms=0.01. At the real embedding scale (rms=0.027207) the block gap is 6.960e-06. Agreement is essentially flat in input scale, so scale does NOT explain the gap between this bisect (~1e-5) and the trace's layer-0 cosine of 0.925. The two tools are measuring different things: audit `trace.py` (hook ordering, which token is sliced, whether both sides see the same mask and dtype) before drawing any conclusion from the trace curve."
+}

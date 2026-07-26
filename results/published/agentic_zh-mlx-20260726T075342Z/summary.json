@@ -1,0 +1,42 @@
+{
+  "suite": "agentic_zh",
+  "n_cases": 30,
+  "n_pass": 27,
+  "pass_rate": 0.9,
+  "pass_rate_ci95": [
+    0.7438,
+    0.9654
+  ],
+  "smoke": false,
+  "by_kind": {
+    "tool_call": {
+      "pass": 24,
+      "n": 27
+    },
+    "json_schema": {
+      "pass": 2,
+      "n": 2
+    },
+    "exact_match": {
+      "pass": 1,
+      "n": 1
+    }
+  },
+  "truncated": {
+    "n": 1,
+    "ids": [
+      "zh-tc-email-wangwu"
+    ]
+  },
+  "latency": {
+    "decode_tps_aggregate": 35.83,
+    "decode_tps_median": 20.0,
+    "ttft_s_median": 2.291,
+    "ttft_s_by_regime": {
+      "with_tools": 2.277,
+      "bare_prompt": 0.568
+    },
+    "mean_gen_tokens": 167.6,
+    "peak_rss_mb": 2851.8
+  }
+}

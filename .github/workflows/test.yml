@@ -1,0 +1,82 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The eval harness is model-free by design: the mock runtime, the graders and
+  # the suite schema all run without weights, Metal, or a download. That makes
+  # the whole suite runnable on free ubuntu runners.
+  eval:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          # mlx is Apple-Silicon-first; the model-free tests don't import it.
+          # Install without the port package so a missing optional dep can't
+          # silently pass as a skip.
+          pip install -e '.[dev]' || pip install -e .
+
+      - name: Tests
+        run: pytest -q
+
+      - name: Suites must validate
+        # A malformed suite should fail CI, not a user's overnight run.
+        run: |
+          nanbeige-mlx-eval list-suites
+          for f in suites/*.json; do
+            nanbeige-mlx-eval validate-suite "$f"
+          done
+
+      - name: Mock run end-to-end
+        # Exercises grading -> artifact writing -> idempotent reporting.
+        run: |
+          nanbeige-mlx-eval run --suite smoke --runtime mock \
+            --output-root "$RUNNER_TEMP/ci-results"
+          test -n "$(ls -A "$RUNNER_TEMP/ci-results")"
+
+  # The port's cache-consistency test needs MLX. MLX ships CPU-only Linux
+  # wheels, so try ubuntu first and fall back to an arm64 macOS runner.
+  port:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install port package
+        working-directory: mlx_nanbeige
+        run: |
+          python -m pip install -U pip
+          pip install -e '.[dev]'
+
+      - name: Verify MLX imports
+        id: mlx
+        run: python -c "import mlx.core as mx; print('mlx', mx.__version__)"
+
+      - name: Tests
+        working-directory: mlx_nanbeige
+        run: pytest -q

@@ -1,0 +1,128 @@
+{
+  "src": "models/nanbeige42-hf",
+  "layer_idx": 0,
+  "dtype": "fp32",
+  "seq_len": 5,
+  "seed": 0,
+  "input_mode": "real",
+  "input_desc": "real embed_tokens(5 tokens), rms=0.02721",
+  "input_rms": 0.027207,
+  "bf16_rope_on_both_sides": false,
+  "first_divergent_stage": null,
+  "block_cosine": 1.0,
+  "stages": [
+    {
+      "stage": "input_layernorm",
+      "cosine": 1.0,
+      "max_abs": 1e-06,
+      "rel_l2": 7e-08,
+      "norm_ref": 43.9409,
+      "verdict": "ok"
+    },
+    {
+      "stage": "q_proj",
+      "cosine": 1.0,
+      "max_abs": 3e-06,
+      "rel_l2": 1.6e-07,
+      "norm_ref": 253.6555,
+      "verdict": "ok"
+    },
+    {
+      "stage": "k_proj",
+      "cosine": 1.0,
+      "max_abs": 2.7e-05,
+      "rel_l2": 8.3e-07,
+      "norm_ref": 167.1576,
+      "verdict": "ok"
+    },
+    {
+      "stage": "v_proj",
+      "cosine": 1.0,
+      "max_abs": 3e-06,
+      "rel_l2": 9.8e-07,
+      "norm_ref": 24.5717,
+      "verdict": "ok"
+    },
+    {
+      "stage": "rope_q",
+      "cosine": 1.0,
+      "max_abs": 4e-06,
+      "rel_l2": 2.1e-07,
+      "norm_ref": 253.6555,
+      "verdict": "ok"
+    },
+    {
+      "stage": "rope_k",
+      "cosine": 1.0,
+      "max_abs": 2.9e-05,
+      "rel_l2": 8.4e-07,
+      "norm_ref": 167.1576,
+      "verdict": "ok"
+    },
+    {
+      "stage": "attn_out",
+      "cosine": 1.0,
+      "max_abs": 9e-06,
+      "rel_l2": 1.85e-06,
+      "norm_ref": 42.9286,
+      "verdict": "ok"
+    },
+    {
+      "stage": "o_proj",
+      "cosine": 1.0,
+      "max_abs": 2.3e-05,
+      "rel_l2": 1.8e-06,
+      "norm_ref": 70.4766,
+      "verdict": "ok"
+    },
+    {
+      "stage": "post_attention_layernorm",
+      "cosine": 1.0,
+      "max_abs": 7e-06,
+      "rel_l2": 2.39e-06,
+      "norm_ref": 26.1581,
+      "verdict": "ok"
+    },
+    {
+      "stage": "gate_proj",
+      "cosine": 1.0,
+      "max_abs": 1.5e-05,
+      "rel_l2": 2.21e-06,
+      "norm_ref": 111.7867,
+      "verdict": "ok"
+    },
+    {
+      "stage": "up_proj",
+      "cosine": 1.0,
+      "max_abs": 1.1e-05,
+      "rel_l2": 2.57e-06,
+      "norm_ref": 81.0063,
+      "verdict": "ok"
+    },
+    {
+      "stage": "swiglu",
+      "cosine": 1.0,
+      "max_abs": 9e-06,
+      "rel_l2": 2.89e-06,
+      "norm_ref": 21.7934,
+      "verdict": "ok"
+    },
+    {
+      "stage": "down_proj",
+      "cosine": 1.0,
+      "max_abs": 2e-05,
+      "rel_l2": 2.93e-06,
+      "norm_ref": 42.5537,
+      "verdict": "ok"
+    },
+    {
+      "stage": "block",
+      "cosine": 1.0,
+      "max_abs": 2.3e-05,
+      "rel_l2": 1.8e-06,
+      "norm_ref": 92.8545,
+      "verdict": "ok"
+    }
+  ],
+  "interpretation": "Every stage agrees to fp32 precision: the port's arithmetic is correct and the observed logit gap is a precision effect. Re-run with --dtype bf16 to find which operation loses it."
+}

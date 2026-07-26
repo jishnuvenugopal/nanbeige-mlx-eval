@@ -36,7 +36,12 @@ def _render_compare(a: dict, b: dict) -> str:
     if any(la.values()) or any(lb.values()):
         lines.append("\n## Latency delta (B − A)\n")
         lines.append("| metric | A | B | Δ |\n|---|---|---|---|\n")
-        for key, unit in (("mean_tps", ""), ("mean_ttft_s", " s"), ("mean_total_s", " s"), ("peak_rss_mb", " MB")):
+        for key, unit in (
+            ("decode_tps_aggregate", " tok/s"),
+            ("decode_tps_median", " tok/s"),
+            ("ttft_s_median", " s"),
+            ("peak_rss_mb", " MB"),
+        ):
             va, vb = la.get(key, 0), lb.get(key, 0)
             lines.append(f"| {key} | {va}{unit} | {vb}{unit} | {vb - va:+.2f}{unit} |\n")
 

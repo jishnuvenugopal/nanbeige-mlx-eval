@@ -14,8 +14,13 @@ __pycache__/
 *.pyc
 *.egg-info/
 
-# generated artifacts (never commit)
+# editor / agent scratch
+.zcode/
+
+# generated artifacts (NOT committed wholesale; the README cites a few runs
+# committed under results/published/ — that path is un-ignored below).
 benchmark_results/
+!results/published/
 .cache/
 .factory/
 huggingface/
@@ -27,3 +32,7 @@ snapshots/
 
 # os
 .DS_Store
+
+# release scaffolding (working docs, not deliverables)
+RELEASE.md
+docs/_*.md

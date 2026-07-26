@@ -1,0 +1,128 @@
+{
+  "src": "models/nanbeige42-hf",
+  "layer_idx": 0,
+  "dtype": "bf16",
+  "seq_len": 5,
+  "seed": 0,
+  "input_mode": "real",
+  "input_desc": "real embed_tokens(5 tokens), rms=0.02721",
+  "input_rms": 0.027207,
+  "bf16_rope_on_both_sides": true,
+  "first_divergent_stage": null,
+  "block_cosine": 0.99999381,
+  "stages": [
+    {
+      "stage": "input_layernorm",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rel_l2": 0.0,
+      "norm_ref": 43.9506,
+      "verdict": "ok"
+    },
+    {
+      "stage": "q_proj",
+      "cosine": 1.0,
+      "max_abs": 0.007812,
+      "rel_l2": 5.582e-05,
+      "norm_ref": 253.6954,
+      "verdict": "ok"
+    },
+    {
+      "stage": "k_proj",
+      "cosine": 1.0,
+      "max_abs": 1.5e-05,
+      "rel_l2": 9e-08,
+      "norm_ref": 167.1708,
+      "verdict": "ok"
+    },
+    {
+      "stage": "v_proj",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rel_l2": 0.0,
+      "norm_ref": 24.5705,
+      "verdict": "ok"
+    },
+    {
+      "stage": "rope_q",
+      "cosine": 1.0,
+      "max_abs": 0.007812,
+      "rel_l2": 5.355e-05,
+      "norm_ref": 253.6949,
+      "verdict": "ok"
+    },
+    {
+      "stage": "rope_k",
+      "cosine": 1.0,
+      "max_abs": 3.1e-05,
+      "rel_l2": 1.8e-07,
+      "norm_ref": 167.1702,
+      "verdict": "ok"
+    },
+    {
+      "stage": "attn_out",
+      "cosine": 0.99999552,
+      "max_abs": 0.015625,
+      "rel_l2": 0.00300771,
+      "norm_ref": 42.904,
+      "verdict": "ok"
+    },
+    {
+      "stage": "o_proj",
+      "cosine": 0.99999511,
+      "max_abs": 0.125,
+      "rel_l2": 0.00317044,
+      "norm_ref": 70.4566,
+      "verdict": "ok"
+    },
+    {
+      "stage": "post_attention_layernorm",
+      "cosine": 0.99999092,
+      "max_abs": 0.007812,
+      "rel_l2": 0.00426792,
+      "norm_ref": 26.1486,
+      "verdict": "ok"
+    },
+    {
+      "stage": "gate_proj",
+      "cosine": 0.99999195,
+      "max_abs": 0.03125,
+      "rel_l2": 0.00401445,
+      "norm_ref": 111.7571,
+      "verdict": "ok"
+    },
+    {
+      "stage": "up_proj",
+      "cosine": 0.9999893,
+      "max_abs": 0.015625,
+      "rel_l2": 0.00463191,
+      "norm_ref": 80.9818,
+      "verdict": "ok"
+    },
+    {
+      "stage": "swiglu",
+      "cosine": 0.99998228,
+      "max_abs": 0.023438,
+      "rel_l2": 0.00596684,
+      "norm_ref": 21.77,
+      "verdict": "ok"
+    },
+    {
+      "stage": "down_proj",
+      "cosine": 0.9999852,
+      "max_abs": 0.0625,
+      "rel_l2": 0.00544095,
+      "norm_ref": 42.4991,
+      "verdict": "ok"
+    },
+    {
+      "stage": "block",
+      "cosine": 0.99999381,
+      "max_abs": 0.125,
+      "rel_l2": 0.0035298,
+      "norm_ref": 92.8269,
+      "verdict": "ok"
+    }
+  ],
+  "interpretation": "Every stage agrees within bf16 tolerance for this layer."
+}
