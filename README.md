@@ -42,17 +42,18 @@ This is a **harness + honest small-N eval**, not a leaderboard. Pass rates carry
   1024-token cap.
 - ⚠️ **A moderate logit gap vs the HF reference shows up on CPU (mean cosine
   0.85, top-1 83%)** — not MPS noise (CPU run reproduces it). Its source is
-  **under active investigation and not yet attributed to the port or the
-  reference.** A cross-check found the port's two code paths agree bit-exactly
-  (cosine 1.0), but a follow-up `--replay` experiment showed the bisect's
-  standalone-layer reference is a *mis-invocation* of the in-model layer (it
-  passes a `[1,1,5,5]` mask and omits `loop_idx`; the real model passes
-  `[1,1,5,6]` and `loop_idx=0`). So the bisect's "0.99999, no logic error" result
-  is not currently trustworthy — it validated the port against the same
-  mis-invocation the port may share. The open question is whether the port's
-  attention mask has the loop/depth dimension the HF reference's does. See
-  [§ Fidelity](#fidelity-half-a). The gap does not affect behavior on the agentic
-  suite.
+  **documented-open, not blocking.** Six candidate causes are ruled out by
+  measurement (device numerics, bf16 compounding, input scale, per-layer
+  arithmetic, the port's own two code paths, and RoPE-at-bf16 — the last because
+  `mx.fast.rope` is fp32-internal regardless of input dtype, confirmed by a
+  bit-identical upcast experiment). The port is verified where it counts:
+  per-layer fp32 agreement with the reference's own `NanbeigeDecoderLayer`, cache
+  equality under mutation testing, bit-identical agreement between its own two
+  code paths, and ~90 % agentic capability flat across 4/6/8-bit. The gap does
+  not affect behavior on the agentic suite. Full record, including every
+  falsified hypothesis and one known blind spot in the settling instrument:
+  [`docs/investigation-log.md`](docs/investigation-log.md). See
+  [§ Fidelity](#fidelity-half-a).
 - 📌 **A real cost of the looped design nobody else has written down:** full
   262K context is unreachable on a 16 GB machine — the looped trunk needs 44 KV
   slots, ~47 GB at max context — and mlx-lm's `--max-kv-size` is inert for this
@@ -128,7 +129,7 @@ nanbeige-mlx-eval parity --src models/nanbeige42-hf --out benchmark_results/pari
 | mean logit cosine | **0.847** |
 | min logit cosine | 0.590 |
 | per-prompt cosine | `0.99, 0.59, 0.59, 0.98, 0.96, 0.97` |
-| RoPE bf16 floor (isolated) | max-abs **0.011** (0.78% of probe RMS) on the cos/sin downcast, measured with a real-`q` probe and the effect isolated to cos/sin only (`results/published/parity_cpu_bf16.json`). `--bf16-rope` moves the per-layer block cosine by ~1e-7 at the real scale — real, localized, not the dominant cause of the end-to-end gap |
+| RoPE bf16 floor (isolated) | max-abs **0.011** (0.78% of probe RMS) on the cos/sin downcast, measured with a real-`q` probe (`results/published/parity_cpu_bf16.json`). **Ruled out as a cause of the end-to-end gap:** an fp32 upcast around the MLX RoPE call left the parity cosine bit-identical (0.846566 both ways, 6 prompts, ~166k logits) — `mx.fast.rope` is fp32-internal regardless of input dtype (Addendum 6 of the investigation log) |
 
 > **Important correction.** An earlier version of this report attributed the gap
 > to "Metal-vs-MPS bfloat16 matmul differences." That hypothesis is **falsified**:
@@ -142,14 +143,20 @@ nanbeige-mlx-eval parity --src models/nanbeige42-hf --out benchmark_results/pari
 > 0. A `crosscheck` showed the port's two code paths agree bit-exactly (cosine
 > 1.0), and that the disagreement is between the bisect's standalone
 > `NanbeigeDecoderLayer` invocation (B) and the same layer inside the full HF
-> model (D): cosine 0.925, RMS 0.656 vs 0.559. A follow-up `--replay`
-> experiment settles which of B or D is the layer's true behaviour: replaying the
-> model's actual call arguments into the layer reproduces D bit-exactly, while B
-> does not. So **B is a mis-invocation** (it builds a `[1,1,5,5]` mask and omits
-> `loop_idx`; the model passes `[1,1,5,6]` and `loop_idx=0`). The curve below is
-> the real in-model behaviour; the open question is whether the port's mask shares
-> the same mis-invocation, which would make this curve a faithful measurement of a
-> real port bug rather than a reference-side artifact.
+> model (D): cosine 0.925, RMS 0.656 vs 0.559. A follow-up `--replay` experiment
+> settles which of B or D is the layer's true behaviour: replaying the model's
+> actual call arguments into the layer reproduces D bit-exactly, while B does
+> not. The difference was localized to the **object**, not the arguments: the
+> bisect's `_real_layer_stages` called `NanbeigeDecoderLayer(...).to(td)`, which
+> casts the non-persistent fp32 `inv_freq` buffer to bf16 (`rope_theta = 7e7` →
+> frequencies span 1.0 down to ~2e-8, mangled by bf16) — and `strict=False`
+> loading can't restore it. (The `[1,1,5,6]` mask shape is a red herring: the 6th
+> column is HF's StaticCache sizing boilerplate, sliced away by eager attention
+> before use — not a loop/depth dimension.) The bisect's `.to(td)` buffer-cast is
+> fixed (parameters-only now), but that fix is confined to the **bisect harness**;
+> it does not close the end-to-end 0.847, because the MLX port has no `inv_freq`
+> buffer to clobber and `mx.fast.rope` is fp32-internal regardless. The curve
+> below is the real in-model behaviour; the end-to-end gap is documented-open.
 
 `nanbeige-mlx-eval trace` dumps hidden states after each of the 44 effective
 layers on both sides and reports cosine per layer. Reading the curve:
@@ -279,20 +286,28 @@ nanbeige-mlx-eval crosscheck --src models/nanbeige42-hf --replay \
 | D in-model vs B standalone | 0.925 | B is the mis-invocation |
 
 **B is the artifact; D is ground truth.** The bisect's `_real_layer_stages`
-passes a `[1,1,5,5]` mask and omits `loop_idx`; the model passes `[1,1,5,6]`
-(the loop/depth dimension) and `loop_idx=0`. The port matches B at 0.99999, so
-the bisect's "no logic error" result is **not trustworthy** — it validated the
-port against a mis-invocation the port likely shares. The open question is
-whether the MLX port's attention mask has the `[1,1,5,6]` loop dimension the HF
-reference's does; if not, that is the source of the 0.847 gap.
+constructed the standalone layer with `NanbeigeDecoderLayer(...).to(td)`, which
+casts the non-persistent fp32 `inv_freq` buffer to bf16 (with `rope_theta = 7e7`,
+the frequencies span 1.0 down to ~2e-8 and bf16 mangles the low end); because the
+buffer is non-persistent, the subsequent `load_state_dict(..., strict=False)`
+cannot restore it. The fix casts parameters only and is confined to the **bisect
+harness** — it does not touch the end-to-end 0.847, because the MLX port has no
+`inv_freq` buffer (it uses `nn.RoPE`, four Python scalars) and `mx.fast.rope` is
+fp32-internal regardless of input dtype (Addendum 6 of the investigation log).
+The `[1,1,5,6]` mask shape that earlier rounds blamed is a red herring: the 6th
+column is HF's StaticCache sizing boilerplate, sliced away by eager attention
+before use. The end-to-end gap remains documented-open.
 
-> Bottom line: **the source of the logit gap is under active investigation.** The
-> bisect's "no logic error" claim (round 4) is reopened — it was established only
-> against B, a mis-invocation. `parity`'s 0.847 (full-forward-vs-full-forward)
-> still implicates the port. The concrete next check is whether the port's mask
-> matches the reference's `[1,1,5,6]` loop-aware mask. The gap does not affect
-> behavior on the agentic suite. Bit-exact parity is not claimed and not expected
-> in bf16.
+> Bottom line: **the source of the logit gap is documented-open, not blocking.**
+> Six candidate causes are ruled out by measurement (the seventh, "RoPE runs in
+> bf16," was killed by a bit-identical upcast experiment — `mx.fast.rope` is
+> fp32-internal regardless of input dtype). The `[1,1,5,6]` mask shape is a red
+> herring: the 6th column is HF's `past_seen_tokens + sequence_length + 1`
+> boilerplate for StaticCache sizing, present in every Llama-family model, and
+> eager attention slices it to `[:,:,:,:L]` before use — nothing to do with
+> `num_loops`. The gap does not affect behavior on the agentic suite. Bit-exact
+> parity is not claimed and not expected in bf16. Full record:
+> [`docs/investigation-log.md`](docs/investigation-log.md).
 
 ### Functional fidelity (the test that matters for the use case)
 
@@ -478,8 +493,11 @@ nanbeige-mlx-eval compare benchmark_results/<run_a> benchmark_results/<run_b>
   tail; an unclosed `<think>` block fails as `truncated_no_answer`.
 - **Wilson 95% CIs** on every pass rate, so 27/30 is read as 0.90 [0.74, 0.97]
   rather than as a deceptive "90%".
-- **Warmup + median** (`--warmup`, `--repeats`) keep first-call compile cost out
-  of published numbers.
+- **Warmup + repeat controls** (`--warmup`, `--repeats`) keep first-call compile
+  cost out of published numbers. Pass rate is repeat-invariant; `--repeats`
+  stabilizes timing. The ladder used `--warmup 1` throughout; EN@4-bit was run at
+  `--repeats 3`, the other five configs at `--repeats 1` (stated per-config in
+  the table above, not assumed uniform).
 - **Answer-key protection:** only the grade outcome and the model's own output
   are persisted — never the suite's expected answer.
 

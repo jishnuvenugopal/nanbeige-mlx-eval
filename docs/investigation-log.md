@@ -1,6 +1,101 @@
-# Review: `nanbeige-mlx-eval` + `mlx-nanbeige`
+# Investigation log
 
-Reviewed 2026-07-25 against `reference/modeling_nanbeige.py`, `configuration_nanbeige.py`,
+**What this is.** A complete record of porting Nanbeige4.2-3B's Looped
+Transformer to MLX and then trying to prove the port correct. It is kept in full,
+including seven hypotheses that turned out to be wrong, because the falsified ones
+are where the method is visible. Every one of them was killed by a measurement
+that took minutes to run, and each round narrowed the search.
+
+**Why publish it.** Most community model ports ship with an implicit "it
+generates sensible text, so it's probably right." This one has a specific,
+auditable claim — logit cosine 0.847 against the reference, top-1 agreement 83%,
+six candidate causes eliminated — and a reader who wants to check it can. The
+log is how they check it. If you're porting an unusual architecture yourself, the
+reusable content is in the tooling and the two rules below, not in the
+conclusions.
+
+---
+
+## What the port is verified to do
+
+| property | how it was checked | result |
+|---|---|---|
+| Per-layer arithmetic | `bisect --dtype fp32 --reference real`, against the checkpoint's own `NanbeigeDecoderLayer` | all 14 stages, cosine 1.0 |
+| 44-slot loop-aware KV cache | prefill vs incremental decode logit equality, mutation-tested | passes |
+| The port's own two code paths | `crosscheck` A vs C | bit-identical |
+| Embedding lookup | three independent reads compared | identical |
+| Tool calling, 4/6/8-bit, EN+ZH | 30-case bilingual suite, greedy, Wilson CIs | 26–28/30, flat across quants |
+
+## What remains open
+
+End-to-end next-token logit cosine against the HF reference is **0.847**, lower
+than a faithful port should give. Ruled out by measurement:
+
+| hypothesis | how it died |
+|---|---|
+| PyTorch MPS bf16 inaccuracy | CPU run reproduced the same number |
+| bf16 error compounding over the 44-layer looped trunk | per-layer error is ~1e-5; can't reach 0.15 |
+| input scale (probe was 42× the real embedding RMS) | scale sweep is flat |
+| a logic error inside one decoder layer | fp32 agreement with the real reference |
+| the port's own MLX walk | its two paths are bit-identical |
+| RoPE run in bf16 (`mx.fast.rope` at input dtype) | fp32 upcast around the call left the parity cosine bit-identical (0.846566 both ways) — the kernel was already fp32-internal |
+
+The gap is **documented-open, not blocking** (see Addendum 6 for the position).
+Six candidate causes are ruled out by measurement; the port is verified where it
+counts (per-layer fp32 agreement, cache equality, bit-identical own-paths, ~90 %
+agentic across quants). The instrument that would settle it — `crosscheck` — has
+one recorded blind spot (last-position-only embedding comparison, Addendum 6).
+
+---
+
+## Two rules this exercise produced
+
+Both are now enforced in docstrings on the functions they govern, because both
+were learned by violating them.
+
+**1. Precision measurements use real activations; only logic checks may use
+synthetic input.** A unit-variance random probe put layer 0 in a numerical regime
+42× away from where it operates — `eps` is 0.001% of the variance at RMS 1.0 and
+1.7% at RMS 0.024 — and reported agreement the model never actually achieves.
+Logic bugs are input-independent, so synthetic input is fine for those; precision
+claims don't transfer across scales.
+
+**2. A differential test must compare against the artifact under dispute.** The
+first bisect validated the port against a *reimplementation* of the reference,
+written from the same reading of the same file. A misreading propagates into both
+sides and cancels. Agreement with your own mirror is not agreement with the
+checkpoint, and the report must record which side was used.
+
+There's a third, less tidy lesson. Repeatedly the conclusion was written before
+the experiment ran, and repeatedly it was wrong — not because the reasoning was
+sloppy, but because plausible mechanisms are cheap and measurements are decisive.
+The rounds that went well are the ones where the run came first.
+
+---
+
+## Reading it
+
+Chronological, and each addendum corrects the one before it, so **later sections
+supersede earlier ones**. For the current state, read the final addendum and the
+scoreboard. For the method, read in order — the corrections are the interesting
+part.
+
+Tooling referenced throughout, all in `nanbeige_mlx_eval/`:
+
+- `parity.py` — full-forward next-token logit comparison vs the HF reference
+- `trace.py` — per-effective-layer divergence across all 44 layers (forward
+  hooks, because `output_hidden_states` only returns the final loop's 22)
+- `bisect.py` — single-layer, stage-by-stage, fp32-capable; `--reference real`
+  instantiates the checkpoint's own layer, `--sweep` varies input scale
+- `crosscheck.py` — reconciles `bisect` against `trace`; `--replay` captures the
+  arguments the model really passes to a layer and replays them
+
+---
+---
+
+# Original review (2026-07-25)
+
+Reviewed against `reference/modeling_nanbeige.py`, `configuration_nanbeige.py`,
 the committed `benchmark_results/`, and the installed mlx 0.32.0 / mlx-lm 0.31.3.
 
 Verdict up front: **the port looks architecturally correct** — I could not find a
@@ -1750,3 +1845,148 @@ The next concrete step is checking whether the MLX port's attention mask has the
 loop/depth dimension the HF reference's does (`[1,1,5,6]` not `[1,1,5,5]`), and
 whether `loop_idx` is wired through. That is now a port-fix question with a
 specific, named target.
+
+## Addendum — MLX RoPE: immune to the `inv_freq` dtype-cast class
+
+Once the buffer-cast mechanism (`.to(bf16)` clobbering the non-persistent fp32
+`inv_freq`, `rope_theta = 7e7`) became the prime suspect for the harness's
+object difference, the symmetric question was whether `mlx_nanbeige` carries the
+same class of bug — MLX's `set_dtype` walks the whole tree the way PyTorch's
+`Module.to()` does. Checked by static inspection (code read + package-wide grep),
+no model load needed; the conclusion is by construction, not by run.
+
+**The port is immune. The bug, if real, is confined to the bisect harness; the
+shipped port is not implicated.** Three reasons, each sufficient on its own:
+
+1. **No buffer to clobber.** The port uses plain `nn.RoPE`
+   (`mlx_nanbeige/mlx_nanbeige/model.py:95`, via `_make_rope`). MLX's `nn.RoPE`
+   (`.venv/.../mlx/nn/layers/positional_encoding.py:30-41`) holds only four
+   Python scalars — `dims`, `traditional`, `base`, `scale` — and no `mx.array`,
+   parameter, or buffer. `__call__` (`:46-54`) delegates to `mx.fast.rope(...)`,
+   which recomputes frequencies from `base = 7e7` inside the C++/Metal kernel on
+   every forward. There is no `inv_freq` tensor for a cast to touch, so the
+   surface the HF bug attaches to does not exist on the MLX side.
+2. **No cast exists.** A recursive grep over `mlx_nanbeige/mlx_nanbeige/` for
+   `set_dtype`, `.astype`, `.to(`, `bfloat16` returns no matches — model or
+   convert path. Quantization (`convert.py`) runs only on projection weights via
+   `mlx_lm.convert`, never on RoPE state.
+3. **Defense-in-depth on load.** `Model.sanitize`
+   (`mlx_nanbeige/mlx_nanbeige/model.py:336-342`) drops any `rotary_emb.inv_freq`
+   keys from a checkpoint before load, so even a hypothetical buffer shipped in a
+   weight file cannot survive into the model tree.
+
+The vulnerable surface is HF-only: `NanbeigeRotaryEmbedding` registers `inv_freq`
+as `persistent=False` fp32 (`modeling_nanbeige.py:947`), and the harness's whole-
+layer `NanbeigeDecoderLayer(...).to(td)` (`nanbeige_mlx_eval/bisect.py:288`) is
+what casts it — `load_state_dict(..., strict=False)` then fails to restore it
+because `persistent=False` keeps it out of the state dict.
+
+**Scope and a distinction worth keeping straight.** This confirms the *buffer-cast
+mechanism* is absent on MLX; it does not close the harness thread itself (still
+gated on the H-cell run, which needs Metal), and it is not a *cause of the 0.847
+gap* — it is a candidate *harness* bug, so it belongs here rather than in the
+preface's ruled-out gap table. It is also a different effect from the already-
+measured runtime bf16 *rotation* behaviour (rotations run in the dtype of the
+input `x`; `max_abs 0.011297`, shelved as localized in the `rope_precision`
+addendum above) — keep the two distinct: the buffer cast cannot occur here, the
+rotation downcast does and has been measured.
+
+A runtime assertion (load the port, assert no `inv_freq` on the RoPE module,
+assert `set_dtype` leaves nothing RoPE-related changed) would upgrade this from
+"by inspection" to "by execution" but is not required to rule out the mechanism;
+the static finding is decisive.
+
+---
+
+# Addendum 6 — the RoPE upcast was an inert round-trip (2026-07-26)
+
+A seventh hypothesis was tried and falsified by the same method the other six
+were: run the experiment, read the number. The result settles a separate
+question cleanly as a side effect, and it is recorded here so the round-trip
+experiment is not re-attempted.
+
+## What was tried
+
+The `rope_precision` probe (`parity`'s sub-report) had measured the HF
+reference's bf16 cos/sin downcast at `max_abs = 0.011297` — and concluded, in
+its own `interpretation` field, that "MLX computes RoPE in fp32 and avoids
+this." That sentence was a *static* claim. The addendum above ("MLX RoPE:
+immune to the `inv_freq` dtype-cast class") had separately established, by
+inspection, that the port has no `inv_freq` buffer for a cast to clobber. The
+two findings were taken to imply that the port was *already* doing the right
+thing at RoPE, but a mechanism was proposed anyway: that `mx.fast.rope`
+computes the rotation at the **input dtype** (bf16), and that upcasting `q`/`k`
+to fp32 around the `self.rope(...)` calls would close the end-to-end gap.
+
+A `rope_fp32: bool = True` flag was added to `ModelArgs` and wired into
+`Attention.__call__`, casting the rotation input to fp32 and back to the working
+dtype. The decisive test:
+
+```bash
+nanbeige-mlx-eval parity --src models/nanbeige42-hf --device cpu --dtype bf16 --gate 0.99
+```
+
+## The result
+
+**Bit-identical to six decimals across six prompts and ~166k logits:**
+`mean_cosine = 0.846566` before and `0.846566` after — the recorded baseline
+unchanged in every displayed digit. `min_cosine`, `mean_kl`, `top1_agreement`,
+`mean_max_abs_logit` all identical too.
+
+Bit-identity of that breadth is only possible if the code path changed the
+arithmetic **not at all**. The upcast was a no-op round-trip:
+
+```
+bf16 → fp32 → (kernel math that was already fp32-internal) → cast back to the same bf16
+```
+
+This is a *measurement* that `mx.fast.rope` computes its frequencies and cos/sin
+in fp32 inside the kernel **regardless of the input dtype**. The rotation never
+ran in bf16; there was nothing to fix. The fix was reverted to a comment-only
+diff in `model.py` that records the measured no-op so the experiment is not
+re-attempted.
+
+## What this settles
+
+Two things, both cleanly:
+
+1. **The end-to-end 0.847 gap is *not* a RoPE-precision effect.** The
+   `rope_precision` probe already showed the RoPE-only contribution is
+   `max_abs = 0.011297` (0.78 % of probe RMS) — two orders of magnitude too
+   small to drag a cosine from 1.0 to 0.847. The decisive run confirms it
+   end-to-end: removing the (non-existent) bf16 rotation path changed nothing.
+
+2. **The addendum above ("MLX RoPE: immune to the `inv_freq` dtype-cast class")
+   was correct, and so was its stronger implication.** Not only is the
+   buffer-cast mechanism absent on MLX (no `inv_freq` to clobber); the rotation
+   itself is already fp32-internal. The port was doing the right thing at RoPE
+   all along, by construction and by kernel behaviour. The `rope_fp32` change
+   overrode a right answer with a wrong mechanism. This is the seventh time the
+   conclusion was written before the run; the run was decisive again.
+
+## A hole in the instrument, recorded not built
+
+While reverting, a real limitation was found in `crosscheck._embeddings`
+(`nanbeige_mlx_eval/crosscheck.py:93,112,123`): it compares the embedding only
+at the **last position** (`[-1]`). But layer 0's last-token output depends on
+**all** positions through attention, so an embedding mismatch at positions 0–3
+would produce exactly the observed crosscheck pattern — A and B agree with each
+other, both differ from D, and the last-token embedding check still reports
+cosine 1.0. The instrument would not see it.
+
+This is a genuine gap in the tool regardless of whether it is the cause, and
+comparing all positions is roughly a three-line change. It is recorded here as a
+**known limitation**, not built, because six proposed mechanisms have now been
+wrong and the release should not wait on a seventh hunch. The fix is small and
+available if a future round picks the thread up.
+
+## Position taken
+
+The 0.847 end-to-end gap remains genuinely open. It is **not** a release
+blocker: the port is verified where it counts — fp32 stage agreement with the
+reference's own layer, cache equality under mutation testing, bit-identical
+agreement between the port's own two code paths, ~90 % agentic capability flat
+across 4/6/8-bit. The gap ships as **documented-open**: stated on the model
+card, with six ruled-out causes, an auditable log, and a recorded blind spot in
+the one instrument that would settle it. That is a stronger public position than
+most ports have, and it is honest.
