@@ -1,6 +1,6 @@
 """Regrade retroactively applies the current graders to persisted outputs.
 
-The motivating case (B1 in CODE_REVIEW.md): the committed 8-bit EN
+The motivating case (B1 in docs/investigation-log.md): the committed 8-bit EN
 `en-json-profile` run graded `schema_valid` on output that was reasoning
 truncated mid-sentence. After the grader fix, regrade must flip it to a fail
 without re-running the model.

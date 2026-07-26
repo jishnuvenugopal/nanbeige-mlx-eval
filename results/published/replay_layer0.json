@@ -3,7 +3,12 @@
   "prompt": "The capital of France is",
   "dtype": "bf16",
   "n_tokens": 5,
-  "inmodel_attention_class": "NanbeigeAttention",
+  "object_comparison": {
+    "inmodel_attention_class": "NanbeigeAttention",
+    "standalone_attention_class": "NanbeigeAttention",
+    "inmodel_rope_inv_freq_dtype": "torch.float32",
+    "standalone_rope_inv_freq_dtype": "torch.bfloat16"
+  },
   "captured_call": {
     "positional": [
       {
@@ -73,19 +78,26 @@
       "rms_b": 0.655962
     },
     {
-      "pair": "D_inmodel vs R_replay_same_object",
+      "pair": "D_inmodel vs R_sameobj_modelargs",
       "cosine": 1.0,
       "max_abs": 0.0,
       "rms_a": 0.559223,
       "rms_b": 0.559223
     },
     {
-      "pair": "B_standalone vs R_replay_same_object",
+      "pair": "D_inmodel vs H_sameobj_handargs",
+      "cosine": 1.0,
+      "max_abs": 0.0,
+      "rms_a": 0.559223,
+      "rms_b": 0.559223
+    },
+    {
+      "pair": "B_standalone vs H_sameobj_handargs",
       "cosine": 0.92506854,
       "max_abs": 4.5,
       "rms_a": 0.655962,
       "rms_b": 0.559223
     }
   ],
-  "verdict": "ARGUMENTS. Replaying the model's own call arguments into the same layer reproduces D (cos=1.000000), while the bisect's hand-built invocation does not (cos=0.925069). So the layer is deterministic and correct; `_real_layer_stages` calls it differently than the model does. Diff `captured_call` against the bisect's invocation (mask construction, cache_position, loop_idx, dtype) -- the differing argument is what the bisect got wrong. CRITICAL: the port matches B, so it very likely shares the same mistake. The bisect's 0.99999 does NOT clear the port."
+  "verdict": "OBJECT, NOT ARGUMENTS. The same layer object returns D with the model's args (cos=1.000000) AND with the bisect's hand-built args (cos=1.000000) -- so the arguments are equivalent and irrelevant. The standalone layer still differs (cos=0.925069), so the fault is in how `_real_layer_stages` CONSTRUCTS the layer. Object differences found: rotary inv_freq dtype torch.float32 (in-model) vs torch.bfloat16 (standalone) -- `.to(bfloat16)` casts non-persistent buffers, and inv_freq spans 1.0 down to ~2e-8, so bf16 mangles the low frequencies. NOTE the mask shape is a red herring: the model's [1,1,L,L+1] comes from HF's `past_seen_tokens + sequence_length + 1` boilerplate, and eager attention slices it to [:, :, :, :L] before use."
 }

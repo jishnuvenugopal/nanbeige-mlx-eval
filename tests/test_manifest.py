@@ -1,6 +1,6 @@
 """The manifest's reproducibility fields must carry real values, not 'unknown'.
 
-B5 in CODE_REVIEW.md: every committed manifest had ``mlx_version: "unknown"``
+B5 in docs/investigation-log.md: every committed manifest had ``mlx_version: "unknown"``
 because the code read ``mlx.__version__`` (which doesn't exist) instead of
 ``mlx.core.__version__``. This test guards against that rotting again.
 """
