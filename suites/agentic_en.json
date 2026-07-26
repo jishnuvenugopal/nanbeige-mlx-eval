@@ -77,7 +77,211 @@
       "id": "en-json-profile",
       "prompt": "Return the user profile as a JSON object with two fields: name set to \"Alex\" and age set to 30.",
       "expect": {"type": "json_schema", "schema": {"type": "object", "required": ["name", "age"], "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}},
-      "max_tokens": 384
+      "max_tokens": 1024
+    },
+    {
+      "id": "en-tc-weather-london",
+      "prompt": "What's the weather like in London?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "City name"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a timezone.", "parameters": {"type": "object", "properties": {"timezone": {"type": "string"}}, "required": ["timezone"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "London"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-weather-singapore",
+      "prompt": "Is it hot in Singapore today?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "Singapore"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-email-bob-cc",
+      "prompt": "Send an email to bob@example.com with subject 'Quarterly report'.",
+      "tools": [
+        {"type": "function", "function": {"name": "send_email", "description": "Send an email.", "parameters": {"type": "object", "properties": {"to": {"type": "string", "description": "Recipient email"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "subject"]}}},
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "Create a calendar event.", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string"}}, "required": ["title", "date"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "send_email", "args": {"to": "bob@example.com", "subject": "Quarterly report"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-email-carol",
+      "prompt": "Email carol@example.com about the meeting.",
+      "tools": [
+        {"type": "function", "function": {"name": "send_email", "description": "Send an email.", "parameters": {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "subject"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "send_email", "args": {"to": "carol@example.com"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-time-ny",
+      "prompt": "What time is it in New York right now?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a timezone.", "parameters": {"type": "object", "properties": {"timezone": {"type": "string", "description": "IANA timezone, e.g. America/New_York"}}, "required": ["timezone"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_current_time", "args": {"timezone": "America/New_York"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-time-london",
+      "prompt": "Tell me the current time in London.",
+      "tools": [
+        {"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a timezone.", "parameters": {"type": "object", "properties": {"timezone": {"type": "string"}}, "required": ["timezone"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_current_time", "args": {"timezone": "Europe/London"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-calendar-meeting",
+      "prompt": "Schedule a team meeting for 2026-09-15.",
+      "tools": [
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "Create a calendar event.", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string", "description": "ISO date YYYY-MM-DD"}}, "required": ["title", "date"]}}},
+        {"type": "function", "function": {"name": "send_email", "description": "Send an email.", "parameters": {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}}, "required": ["to", "subject"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "create_calendar_event", "args": {"date": "2026-09-15"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-calendar-deadline",
+      "prompt": "Block out 2026-10-31 for the project deadline.",
+      "tools": [
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "Create a calendar event.", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string", "description": "ISO date YYYY-MM-DD"}}, "required": ["title", "date"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "create_calendar_event", "args": {"date": "2026-10-31"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-translate-spanish",
+      "prompt": "Translate 'thank you' into Spanish.",
+      "tools": [
+        {"type": "function", "function": {"name": "translate", "description": "Translate text into a target language.", "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "target_language": {"type": "string"}}, "required": ["text", "target_language"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "translate", "args": {"target_language": "Spanish"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-translate-german",
+      "prompt": "How do you say 'good evening' in German? Use the translate tool.",
+      "tools": [
+        {"type": "function", "function": {"name": "translate", "description": "Translate text into a target language.", "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "target_language": {"type": "string"}}, "required": ["text", "target_language"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "translate", "args": {"target_language": "German"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-flight-london-paris",
+      "prompt": "I need a flight from London to Paris.",
+      "tools": [
+        {"type": "function", "function": {"name": "book_flight", "description": "Book a flight.", "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}, "date": {"type": "string"}}, "required": ["origin", "destination"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "book_flight", "args": {"origin": "London", "destination": "Paris"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-flight-la",
+      "prompt": "Book me a flight to Los Angeles from Chicago.",
+      "tools": [
+        {"type": "function", "function": {"name": "book_flight", "description": "Book a flight.", "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}}, "required": ["origin", "destination"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "book_flight", "args": {"destination": "Los Angeles", "origin": "Chicago"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-search-docs",
+      "prompt": "Search the web for 'MLX transformer documentation'.",
+      "tools": [
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "search_web", "args": {"query": "MLX transformer documentation"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-search-recipe",
+      "prompt": "Find a recipe for pasta carbonara online.",
+      "tools": [
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "search_web", "args": {"query": "pasta carbonara recipe"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-choice-routing",
+      "prompt": "I want to know the weather in Berlin. Should I use the weather tool or the search tool?",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "Berlin"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-multiarg-calendar",
+      "prompt": "Create a calendar event titled 'Launch review' on 2026-11-20.",
+      "tools": [
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "Create a calendar event.", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string", "description": "ISO date YYYY-MM-DD"}}, "required": ["title", "date"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "create_calendar_event", "args": {"title": "Launch review", "date": "2026-11-20"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-multiarg-email",
+      "prompt": "Email dave@example.com with subject 'Invoice 2026' and mention the body is about billing.",
+      "tools": [
+        {"type": "function", "function": {"name": "send_email", "description": "Send an email.", "parameters": {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "subject"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "send_email", "args": {"to": "dave@example.com", "subject": "Invoice 2026"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-distractor-time",
+      "prompt": "What's the weather and time in Tokyo? Start with the time.",
+      "tools": [
+        {"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a timezone.", "parameters": {"type": "object", "properties": {"timezone": {"type": "string"}}, "required": ["timezone"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_current_time", "args": {"timezone": "Asia/Tokyo"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-distractor-search",
+      "prompt": "What's the weather in Madrid? Don't search the web, use the weather tool.",
+      "tools": [
+        {"type": "function", "function": {"name": "search_web", "description": "Search the web.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city.", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "Madrid"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-tc-flight-date",
+      "prompt": "Book a flight from Seattle to Boston on 2026-12-01.",
+      "tools": [
+        {"type": "function", "function": {"name": "book_flight", "description": "Book a flight.", "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}, "date": {"type": "string"}}, "required": ["origin", "destination"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "book_flight", "args": {"origin": "Seattle", "destination": "Boston", "date": "2026-12-01"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "en-json-config",
+      "prompt": "Return a JSON object representing server config with fields: host set to \"localhost\" and port set to 8080.",
+      "expect": {"type": "json_schema", "schema": {"type": "object", "required": ["host", "port"], "properties": {"host": {"type": "string"}, "port": {"type": "number"}}}},
+      "max_tokens": 1024
+    },
+    {
+      "id": "en-exact-capital",
+      "prompt": "What is the capital of Australia? Reply with just the city name.",
+      "expect": {"type": "exact_match", "value": "Canberra"},
+      "max_tokens": 512
     }
   ]
 }

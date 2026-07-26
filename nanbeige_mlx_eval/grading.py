@@ -4,6 +4,15 @@ Grading is deliberately format-tolerant: agentic models emit tool calls in many
 shapes (raw JSON, ``<tool_call>`` blocks, ``name``/``arguments`` or
 ``tool``/``parameters`` keys). The graders normalize all of these before
 comparison so a suite is not brittle to surface formatting.
+
+**Reasoning isolation.** Nanbeige4.2-3B is a reasoning model: the chat template
+appends ``<think>`` and the model emits chain-of-thought before the answer. The
+grader therefore splits the output on the first ``</think>`` and grades only the
+*answer tail* — never the scratchpad. If the block never closed (the model ran
+past the token cap mid-thought, or never emitted a call), grading fails with
+``truncated_no_answer`` rather than scanning the whole stream for a coincidental
+match. A suite/case may set ``require_answer: false`` to opt out for a
+non-thinking model.
 """
 
 from __future__ import annotations
@@ -11,6 +20,30 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+
+
+# Matches </think>, </think >, </think\t...>. The first split point is the
+# boundary between reasoning and the answer.
+_THINK_CLOSE = re.compile(r"</think\s*>", re.IGNORECASE)
+_THINK_OPEN = re.compile(r"<think[^>]*>", re.IGNORECASE)
+
+
+def split_reasoning(output: str) -> tuple[str, str | None]:
+    """Split ``output`` into ``(reasoning, answer)`` on the first ``</think>``.
+
+    ``answer`` is ``None`` when the reasoning block never closed (truncation or
+    a model that opened ``<think>`` but never emitted the call). When there is
+    no ``<think>`` tag at all (e.g. a non-thinking suite), the whole output is
+    treated as the answer.
+    """
+    parts = _THINK_CLOSE.split(output, maxsplit=1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    # No closing tag. If there's an opening <think>, this is a truncated block;
+    # if not, the model isn't reasoning and the whole stream is the answer.
+    if _THINK_OPEN.search(output):
+        return output, None
+    return "", output
 
 
 def _strip_tool_call_tags(text: str) -> str:
@@ -88,25 +121,47 @@ def _norm_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip()).lower()
 
 
-def grade(expect: dict[str, Any], output: str) -> dict[str, Any]:
+def grade(
+    expect: dict[str, Any],
+    output: str,
+    *,
+    require_answer: bool = True,
+) -> dict[str, Any]:
     """Grade ``output`` against an ``expect`` spec.
 
-    Returns ``{"pass": bool, "detail": str}``.
+    Grades only the **answer tail** (the text after the first ``</think>``),
+    never the reasoning scratchpad. If ``require_answer`` is true (the default)
+    and the reasoning block never closed, the case fails with
+    ``truncated_no_answer`` instead of scanning the whole stream for a
+    coincidental match — a model that wrote a conforming JSON object while
+    *reasoning about JSON* but never emitted an answer must not pass.
+
+    Returns ``{"pass": bool, "detail": str}`` and may include a
+    ``reasoning_chars`` field on truncation.
     """
+    reasoning, answer = split_reasoning(output)
+    if require_answer and answer is None:
+        return {
+            "pass": False,
+            "detail": "truncated_no_answer",
+            "reasoning_chars": len(reasoning),
+        }
+    target = answer if answer is not None else output
+
     kind = expect.get("type")
     if kind == "tool_call":
-        return _grade_tool_call(expect, output)
+        return _grade_tool_call(expect, target)
     if kind == "exact_match":
-        ok = _norm_text(output) == _norm_text(str(expect.get("value", "")))
+        ok = _norm_text(target) == _norm_text(str(expect.get("value", "")))
         return {"pass": ok, "detail": "exact_match" if ok else "mismatch"}
     if kind == "contains":
-        ok = _norm_text(str(expect.get("value", ""))) in _norm_text(output)
+        ok = _norm_text(str(expect.get("value", ""))) in _norm_text(target)
         return {"pass": ok, "detail": "found" if ok else "missing"}
     if kind == "json_schema":
-        return _grade_json_schema(expect, output)
+        return _grade_json_schema(expect, target)
     if kind == "choice":
         opts = [str(o) for o in expect.get("options", [])]
-        norm_out = _norm_text(output)
+        norm_out = _norm_text(target)
         # accept the option whose normalized form appears in the output
         hit = next((o for o in opts if _norm_text(o) and _norm_text(o) in norm_out), None)
         return {"pass": hit is not None, "detail": hit or "no_option_matched"}
@@ -186,11 +241,15 @@ def _grade_json_schema(expect: dict[str, Any], output: str) -> dict[str, Any]:
         return {"pass": False, "detail": "no_json_object_found"}
     try:
         import jsonschema  # type: ignore
-
+    except ImportError as exc:
+        # A grader that can't grade must never return pass. Failing open here
+        # would silently pass every json_schema case on a bare install.
+        raise RuntimeError(
+            "json_schema grading requires the `jsonschema` package; install it "
+            "(pip install jsonschema) or remove json_schema cases from the suite."
+        ) from exc
+    try:
         jsonschema.validate(instance=obj, schema=expect["schema"])
         return {"pass": True, "detail": "schema_valid"}
-    except ImportError:
-        # without jsonschema, just confirm it parsed as an object
-        return {"pass": True, "detail": "json_object (schema unchecked)"}
     except jsonschema.ValidationError as exc:  # type: ignore
         return {"pass": False, "detail": f"schema_fail:{exc.message}"}

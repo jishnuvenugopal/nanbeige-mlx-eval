@@ -2,8 +2,7 @@
 
 A suite is a JSON file describing a set of cases and how each is graded. The
 schema is enforced with ``jsonschema`` so that ``validate-suite`` gives a hard
-guarantee a suite is well-formed before any model runs (mirrors the
-harness-readiness discipline of the sibling ``ornith-mlx-eval`` project).
+guarantee a suite is well-formed before any model runs.
 """
 
 from __future__ import annotations

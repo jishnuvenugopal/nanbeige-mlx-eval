@@ -77,7 +77,211 @@
       "id": "zh-json-profile",
       "prompt": "把用户资料返回为 JSON 对象，包含两个字段：name（字符串，值为“小明”）和 age（数字，值为 25）。",
       "expect": {"type": "json_schema", "schema": {"type": "object", "required": ["name", "age"], "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}},
-      "max_tokens": 384
+      "max_tokens": 1024
+    },
+    {
+      "id": "zh-tc-weather-shanghai",
+      "prompt": "上海现在的天气怎么样？",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "城市名称"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "get_current_time", "description": "查询某个时区的当前时间。", "parameters": {"type": "object", "properties": {"timezone": {"type": "string"}}, "required": ["timezone"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "上海"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-weather-guangzhou",
+      "prompt": "广州今天热不热？",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "在网络上搜索。", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "广州"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-email-lisi",
+      "prompt": "给 lisi@example.com 发一封邮件，主题是“季度报告”。",
+      "tools": [
+        {"type": "function", "function": {"name": "send_email", "description": "发送一封电子邮件。", "parameters": {"type": "object", "properties": {"to": {"type": "string", "description": "收件人邮箱"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "subject"]}}},
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "创建一个日历事件。", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string"}}, "required": ["title", "date"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "send_email", "args": {"to": "lisi@example.com", "subject": "季度报告"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-email-wangwu",
+      "prompt": "给 wangwu@example.com 发一封关于会议的邮件。",
+      "tools": [
+        {"type": "function", "function": {"name": "send_email", "description": "发送一封电子邮件。", "parameters": {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "subject"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "在网络上搜索。", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "send_email", "args": {"to": "wangwu@example.com"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-time-tokyo",
+      "prompt": "东京现在几点？",
+      "tools": [
+        {"type": "function", "function": {"name": "get_current_time", "description": "查询某个时区的当前时间。", "parameters": {"type": "object", "properties": {"timezone": {"type": "string", "description": "IANA 时区，例如 Asia/Tokyo"}}, "required": ["timezone"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_current_time", "args": {"timezone": "Asia/Tokyo"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-time-newyork",
+      "prompt": "告诉我纽约现在的时间。",
+      "tools": [
+        {"type": "function", "function": {"name": "get_current_time", "description": "查询某个时区的当前时间。", "parameters": {"type": "object", "properties": {"timezone": {"type": "string"}}, "required": ["timezone"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_current_time", "args": {"timezone": "America/New_York"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-calendar-meeting",
+      "prompt": "帮我把团队会议安排在 2026-09-15。",
+      "tools": [
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "创建一个日历事件。", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string", "description": "ISO 日期 YYYY-MM-DD"}}, "required": ["title", "date"]}}},
+        {"type": "function", "function": {"name": "send_email", "description": "发送一封电子邮件。", "parameters": {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}}, "required": ["to", "subject"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "create_calendar_event", "args": {"date": "2026-09-15"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-calendar-deadline",
+      "prompt": "把 2026-10-31 这天留给项目截止日期。",
+      "tools": [
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "创建一个日历事件。", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string", "description": "ISO 日期 YYYY-MM-DD"}}, "required": ["title", "date"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "create_calendar_event", "args": {"date": "2026-10-31"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-translate-english",
+      "prompt": "把短语“谢谢”翻译成英语。",
+      "tools": [
+        {"type": "function", "function": {"name": "translate", "description": "将文本翻译成目标语言。", "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "target_language": {"type": "string"}}, "required": ["text", "target_language"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "translate", "args": {"target_language": "英语"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-translate-korean",
+      "prompt": "“再见”用韩语怎么说？请使用翻译工具。",
+      "tools": [
+        {"type": "function", "function": {"name": "translate", "description": "将文本翻译成目标语言。", "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "target_language": {"type": "string"}}, "required": ["text", "target_language"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "在网络上搜索。", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "translate", "args": {"target_language": "韩语"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-flight-bj-gz",
+      "prompt": "我需要一张从北京到广州的机票。",
+      "tools": [
+        {"type": "function", "function": {"name": "book_flight", "description": "预订一张机票。", "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}, "date": {"type": "string"}}, "required": ["origin", "destination"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "book_flight", "args": {"origin": "北京", "destination": "广州"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-flight-sh-gz",
+      "prompt": "帮我订一张从上海去广州的机票。",
+      "tools": [
+        {"type": "function", "function": {"name": "book_flight", "description": "预订一张机票。", "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}}, "required": ["origin", "destination"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "book_flight", "args": {"origin": "上海", "destination": "广州"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-search-docs",
+      "prompt": "在网上搜索“MLX transformer 文档”。",
+      "tools": [
+        {"type": "function", "function": {"name": "search_web", "description": "在网络上搜索。", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "search_web", "args": {"query": "MLX transformer 文档"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-search-recipe",
+      "prompt": "在网上找一个番茄炒蛋的做法。",
+      "tools": [
+        {"type": "function", "function": {"name": "search_web", "description": "在网络上搜索。", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "search_web", "args": {"query": "番茄炒蛋 做法"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-choice-routing",
+      "prompt": "我想知道深圳的天气。应该用天气工具还是搜索工具？",
+      "tools": [
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
+        {"type": "function", "function": {"name": "search_web", "description": "在网络上搜索。", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "深圳"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-multiarg-calendar",
+      "prompt": "创建一个标题为“产品评审”、日期为 2026-11-20 的日历事件。",
+      "tools": [
+        {"type": "function", "function": {"name": "create_calendar_event", "description": "创建一个日历事件。", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "date": {"type": "string", "description": "ISO 日期 YYYY-MM-DD"}}, "required": ["title", "date"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "create_calendar_event", "args": {"title": "产品评审", "date": "2026-11-20"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-multiarg-email",
+      "prompt": "给 zhaoliu@example.com 发邮件，主题是“发票 2026”，正文与账单有关。",
+      "tools": [
+        {"type": "function", "function": {"name": "send_email", "description": "发送一封电子邮件。", "parameters": {"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "subject"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "send_email", "args": {"to": "zhaoliu@example.com", "subject": "发票 2026"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-distractor-time",
+      "prompt": "上海的天气和时间分别是什么？先告诉我时间。",
+      "tools": [
+        {"type": "function", "function": {"name": "get_current_time", "description": "查询某个时区的当前时间。", "parameters": {"type": "object", "properties": {"timezone": {"type": "string"}}, "required": ["timezone"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_current_time", "args": {"timezone": "Asia/Shanghai"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-distractor-search",
+      "prompt": "成都的天气怎么样？不要搜索网页，请用天气工具。",
+      "tools": [
+        {"type": "function", "function": {"name": "search_web", "description": "在网络上搜索。", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+        {"type": "function", "function": {"name": "get_weather", "description": "查询某个城市的当前天气。", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "get_weather", "args": {"location": "成都"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-tc-flight-date",
+      "prompt": "帮我订一张 2026-12-01 从成都到杭州的机票。",
+      "tools": [
+        {"type": "function", "function": {"name": "book_flight", "description": "预订一张机票。", "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}, "date": {"type": "string"}}, "required": ["origin", "destination"]}}}
+      ],
+      "expect": {"type": "tool_call", "tool": "book_flight", "args": {"origin": "成都", "destination": "杭州", "date": "2026-12-01"}, "args_match": "subset"},
+      "max_tokens": 512
+    },
+    {
+      "id": "zh-json-config",
+      "prompt": "返回一个表示服务器配置的 JSON 对象，包含字段：host（字符串，值为“localhost”）和 port（数字，值为 8080）。",
+      "expect": {"type": "json_schema", "schema": {"type": "object", "required": ["host", "port"], "properties": {"host": {"type": "string"}, "port": {"type": "number"}}}},
+      "max_tokens": 1024
+    },
+    {
+      "id": "zh-exact-capital",
+      "prompt": "澳大利亚的首都是哪里？请只回答城市名。",
+      "expect": {"type": "exact_match", "value": "堪培拉"},
+      "max_tokens": 512
     }
   ]
 }

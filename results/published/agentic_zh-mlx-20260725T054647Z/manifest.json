@@ -1,0 +1,31 @@
+{
+  "run_id": "20260725T054647Z",
+  "suite": "agentic_zh",
+  "suite_language": "zh",
+  "suite_category": "tool_use",
+  "runtime": "mlx",
+  "model": "models/nanbeige-mlx-4bit",
+  "quantization": {
+    "bits": 4,
+    "group_size": 64
+  },
+  "env": {
+    "python": "3.12.12",
+    "platform": "macOS-26.5-arm64-arm-64bit",
+    "machine": "arm64",
+    "mlx": "0.32.0",
+    "mlx_lm": "0.31.3",
+    "mlx_nanbeige": "0.2.0",
+    "transformers": "5.14.1",
+    "git_commit": "0a0cf2c"
+  },
+  "settings": {
+    "decoding": "greedy(temp=0.0)",
+    "default_max_tokens": 768,
+    "limit": null,
+    "smoke": false,
+    "warmup": 1,
+    "repeats": 1
+  },
+  "n_cases": 8
+}
