@@ -1,0 +1,40 @@
+{
+  "suite": "agentic_en",
+  "n_cases": 30,
+  "n_pass": 26,
+  "pass_rate": 0.8667,
+  "pass_rate_ci95": [
+    0.7032,
+    0.9469
+  ],
+  "smoke": false,
+  "by_kind": {
+    "tool_call": {
+      "pass": 23,
+      "n": 27
+    },
+    "json_schema": {
+      "pass": 2,
+      "n": 2
+    },
+    "exact_match": {
+      "pass": 1,
+      "n": 1
+    }
+  },
+  "truncated": {
+    "n": 0,
+    "ids": []
+  },
+  "latency": {
+    "decode_tps_aggregate": 22.95,
+    "decode_tps_median": 14.75,
+    "ttft_s_median": 2.631,
+    "ttft_s_by_regime": {
+      "with_tools": 2.694,
+      "bare_prompt": 0.663
+    },
+    "mean_gen_tokens": 162.2,
+    "peak_rss_mb": 3782.0
+  }
+}

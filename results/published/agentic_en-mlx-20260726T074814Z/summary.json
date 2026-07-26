@@ -1,0 +1,42 @@
+{
+  "suite": "agentic_en",
+  "n_cases": 30,
+  "n_pass": 26,
+  "pass_rate": 0.8667,
+  "pass_rate_ci95": [
+    0.7032,
+    0.9469
+  ],
+  "smoke": false,
+  "by_kind": {
+    "tool_call": {
+      "pass": 23,
+      "n": 27
+    },
+    "json_schema": {
+      "pass": 2,
+      "n": 2
+    },
+    "exact_match": {
+      "pass": 1,
+      "n": 1
+    }
+  },
+  "truncated": {
+    "n": 1,
+    "ids": [
+      "en-tc-flight-london-paris"
+    ]
+  },
+  "latency": {
+    "decode_tps_aggregate": 20.67,
+    "decode_tps_median": 13.96,
+    "ttft_s_median": 2.312,
+    "ttft_s_by_regime": {
+      "with_tools": 2.379,
+      "bare_prompt": 0.636
+    },
+    "mean_gen_tokens": 166.3,
+    "peak_rss_mb": 4741.4
+  }
+}

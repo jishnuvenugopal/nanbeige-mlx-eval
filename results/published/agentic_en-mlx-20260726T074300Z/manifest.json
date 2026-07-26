@@ -1,12 +1,12 @@
 {
-  "run_id": "20260725T054647Z",
-  "suite": "agentic_zh",
-  "suite_language": "zh",
+  "run_id": "20260726T074300Z",
+  "suite": "agentic_en",
+  "suite_language": "en",
   "suite_category": "tool_use",
   "runtime": "mlx",
-  "model": "models/nanbeige-mlx-4bit",
+  "model": "models/nanbeige-mlx-6bit",
   "quantization": {
-    "bits": 4,
+    "bits": 6,
     "group_size": 64
   },
   "env": {
@@ -17,15 +17,15 @@
     "mlx_lm": "0.31.3",
     "mlx_nanbeige": "0.2.0",
     "transformers": "5.14.1",
-    "git_commit": "0a0cf2c"
+    "git_commit": "c800313"
   },
   "settings": {
     "decoding": "greedy(temp=0.0)",
-    "default_max_tokens": 768,
+    "default_max_tokens": 1024,
     "limit": null,
     "smoke": false,
     "warmup": 1,
     "repeats": 1
   },
-  "n_cases": 8
+  "n_cases": 30
 }
