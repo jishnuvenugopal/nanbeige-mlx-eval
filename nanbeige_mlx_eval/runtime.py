@@ -187,13 +187,22 @@ def _git_sha() -> str:
 
 
 def _env_info() -> dict[str, Any]:
-    import mlx.core as mx
+    # mlx.core.__version__ (not mlx.__version__) when mlx is importable. The
+    # import is best-effort: this function runs on the mock-runtime path (which
+    # the model-free tests exercise) and on CI runners where mlx may not be
+    # installable (no linux x86_64 wheel). Stamp "unavailable" rather than
+    # hard-failing so a missing optional dep can't break manifest writing.
+    try:
+        import mlx.core as mx
+        mlx_version: Any = mx.__version__
+    except Exception:
+        mlx_version = "unavailable"
 
     return {
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "machine": platform.machine(),
-        "mlx": mx.__version__,            # mlx.core.__version__, not mlx.__version__
+        "mlx": mlx_version,
         "mlx_lm": _pkg_version("mlx-lm"),
         "mlx_nanbeige": _pkg_version("mlx-nanbeige"),
         "transformers": _pkg_version("transformers"),

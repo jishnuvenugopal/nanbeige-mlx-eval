@@ -10,14 +10,28 @@ import sys
 import pytest
 
 
+def _mlx_available() -> bool:
+    try:
+        import mlx.core  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def test_env_info_has_real_mlx_version():
     from nanbeige_mlx_eval.runtime import _env_info
 
     env = _env_info()
-    # mlx.core.__version__ exists and is a version-like string.
+    # mlx.core.__version__ exists and is a version-like string when mlx is
+    # importable. On a runner without mlx (no linux x86_64 wheel), _env_info
+    # stamps "unavailable" rather than raising -- that's the correct behaviour
+    # for a model-free path, so accept it when mlx genuinely isn't installed.
     assert "mlx" in env, env
-    assert env["mlx"] != "unknown", f"mlx version is 'unknown': {env}"
-    assert isinstance(env["mlx"], str) and env["mlx"]
+    if _mlx_available():
+        assert env["mlx"] not in ("unknown", "unavailable"), f"mlx present but version not real: {env}"
+        assert isinstance(env["mlx"], str) and env["mlx"]
+    else:
+        assert env["mlx"] == "unavailable", f"mlx absent but env says {env['mlx']!r}"
     # mlx-lm and transformers presence is recorded (they may be 'absent' on a
     # stripped CI image, but the key must exist).
     for key in ("mlx_lm", "mlx_nanbeige", "transformers"):
@@ -36,7 +50,11 @@ def test_manifest_env_round_trip(tmp_path):
     )
     import json
     m = json.loads((tmp_path / "manifest.json").read_text())
-    assert m["env"]["mlx"] != "unknown"
+    # Accept the real version when mlx is present, "unavailable" when it isn't.
+    if _mlx_available():
+        assert m["env"]["mlx"] not in ("unknown", "unavailable")
+    else:
+        assert m["env"]["mlx"] == "unavailable"
     assert m["settings"]["warmup"] == 0
     assert m["settings"]["repeats"] == 1
 
@@ -52,6 +70,8 @@ def test_wilson_interval_bounds():
     assert wilson(0, 0) == (0.0, 0.0)
 
 
+@pytest.mark.skipif(not _mlx_available(), reason=(
+    "mlx_peak_mb measures Metal memory; mlx not importable here"))
 def test_mlx_peak_mb_runs():
     # Smoke: mlx_peak_mb returns a float and doesn't raise on this build.
     from nanbeige_mlx_eval.profile import mlx_peak_mb, reset_peak_memory
