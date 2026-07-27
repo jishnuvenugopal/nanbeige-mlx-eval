@@ -14,13 +14,17 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from mlx_nanbeige.convert import to_mlx
-
 from .compare import write_compare
-from .parity import run_parity
 from .report import write_report
 from .runtime import MLXRuntime, MockRuntime, run_suite
 from .suite import SuiteError, builtin_suites_dir, list_builtin_suites, load_suite
+
+# `to_mlx` (mlx_nanbeige.convert) and `run_parity` (.parity) pull in mlx / mlx_lm
+# at module top level. Importing them here would make every subcommand --
+# including the model-free ones (list-suites, validate-suite, report, compare,
+# run --runtime mock) -- require mlx, which has no linux x86_64 wheel and so
+# cannot run in CI. Import them lazily inside cmd_convert / cmd_parity instead,
+# matching the lazy imports already used by cmd_trace / cmd_crosscheck / cmd_bisect.
 
 
 def _resolve_suite(suite: str) -> Path:
@@ -154,11 +158,15 @@ def cmd_bisect(args):
 
 
 def cmd_convert(args):
+    from mlx_nanbeige.convert import to_mlx
+
     out = to_mlx(args.src, args.out, args.bits, args.group_size)
     print(out)
 
 
 def cmd_parity(args):
+    from .parity import run_parity
+
     r = run_parity(
         args.src, output=args.out, device=args.device, dtype=args.dtype, seed=args.seed
     )
