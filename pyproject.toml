@@ -28,9 +28,11 @@ classifiers = [
 # mlx-nanbeige owns the port (single source of truth); the eval depends on it.
 # jsonschema is a runtime dep: a grader that can't grade must never silently pass.
 dependencies = [
-    "mlx-nanbeige>=0.2.0",
-    "mlx>=0.32",
-    "mlx-lm>=0.31",
+    "mlx-nanbeige>=0.2.0,<0.3",
+    "mlx>=0.32,<0.34",
+    # Upper-bounded to match mlx-nanbeige: the port imports mlx-lm internals.
+    # See the note in mlx_nanbeige/pyproject.toml.
+    "mlx-lm>=0.31,<0.33",
     "transformers>=4.40",
     "huggingface_hub>=1.20",
     "numpy>=2.0",
@@ -41,6 +43,13 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jishnuvenugopal/nanbeige-mlx-eval"
+Repository = "https://github.com/jishnuvenugopal/nanbeige-mlx-eval"
+Issues = "https://github.com/jishnuvenugopal/nanbeige-mlx-eval/issues"
+"Investigation log" = "https://github.com/jishnuvenugopal/nanbeige-mlx-eval/blob/main/docs/investigation-log.md"
+"MLX port package" = "https://github.com/jishnuvenugopal/mlx-nanbeige"
 
 [project.scripts]
 nanbeige-mlx-eval = "nanbeige_mlx_eval.cli:main"

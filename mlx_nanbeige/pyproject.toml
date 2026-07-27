@@ -25,11 +25,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# Pinned to the mlx-lm internals the shipped model_file depends on
-# (mlx_lm.models.base / .cache; see model.py). C1/C2 in docs/investigation-log.md.
+# model.py imports mlx-lm *internals* — `mlx_lm.models.base`
+# (scaled_dot_product_attention, create_attention_mask) and `mlx_lm.models.cache`
+# (KVCache). Those carry no stability guarantee, and this file is copied verbatim
+# into every published weight repo as `nanbeige.py`, where it is frozen: a user
+# who already downloaded a quant cannot receive a patch. So the upper bound is
+# deliberate. Relaxing it is a decision to make after testing against the new
+# mlx-lm, not a default. Tested against mlx 0.32.0 / mlx-lm 0.31.3.
+# See C1/C2 in docs/investigation-log.md.
 dependencies = [
-    "mlx>=0.32",
-    "mlx-lm>=0.31",
+    "mlx>=0.32,<0.34",
+    "mlx-lm>=0.31,<0.33",
     "huggingface_hub>=1.20",
     "transformers>=4.40",
 ]
@@ -39,12 +45,22 @@ dev = [
     "pytest>=8",
 ]
 
+[project.urls]
+Homepage = "https://github.com/jishnuvenugopal/mlx-nanbeige"
+Repository = "https://github.com/jishnuvenugopal/mlx-nanbeige"
+Issues = "https://github.com/jishnuvenugopal/mlx-nanbeige/issues"
+Changelog = "https://github.com/jishnuvenugopal/mlx-nanbeige/blob/main/CHANGELOG.md"
+"Evaluation harness" = "https://github.com/jishnuvenugopal/nanbeige-mlx-eval"
+
 [project.scripts]
 mlx-nanbeige-convert = "mlx_nanbeige.convert:main"
 mlx-nanbeige-upload = "mlx_nanbeige.upload:main"
 
 [tool.setuptools]
 packages = ["mlx_nanbeige"]
+
+[tool.setuptools.package-data]
+mlx_nanbeige = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

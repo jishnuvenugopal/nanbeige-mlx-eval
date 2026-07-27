@@ -36,3 +36,4 @@ snapshots/
 # release scaffolding (working docs, not deliverables)
 RELEASE.md
 docs/_*.md
+HANDOFF.md
