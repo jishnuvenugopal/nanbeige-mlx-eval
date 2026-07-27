@@ -27,13 +27,13 @@ jobs:
       - name: Install
         run: |
           python -m pip install -U pip
-          # The eval declares mlx-nanbeige as a runtime dep. Until the port is
-          # published to PyPI and extracted to its own repo (release steps 3-4),
-          # satisfy it from the in-tree copy. mlx is Apple-Silicon-first with no
+          # The eval declares mlx-nanbeige as a runtime dep. The port now lives
+          # in its own repo (jishnuvenugopal/mlx-nanbeige); until it's on PyPI
+          # install it from there --no-deps. mlx is Apple-Silicon-first with no
           # linux x86_64 wheel, so install both packages --no-deps and add only
           # the deps the model-free tests need (jsonschema for suite validation,
           # pytest). The mlx-specific tests skip themselves when mlx is absent.
-          pip install -e ./mlx_nanbeige --no-deps -q
+          pip install "mlx-nanbeige @ git+https://github.com/jishnuvenugopal/mlx-nanbeige@main" --no-deps -q
           pip install -e . --no-deps -q
           pip install jsonschema pytest -q
 
