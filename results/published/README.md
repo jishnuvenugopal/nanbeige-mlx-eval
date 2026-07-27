@@ -18,7 +18,7 @@ on the `fix/parity-bisect-and-suite-widen` branch).
 
 This is intentional and the numbers are still valid: between `c800313` and the
 release commit, the only change to code that affects inference is a **comment**
-in `mlx_nanbeige/mlx_nanbeige/model.py` documenting a measured no-op (the RoPE
+in `nanbeige_mlx/nanbeige_mlx/model.py` documenting a measured no-op (the RoPE
 fp32 upcast experiment — see Addendum 6 of
 [`docs/investigation-log.md`](../../docs/investigation-log.md)). No executable
 line that the model runs changed, so the Half B pass rates, latencies, and

@@ -423,11 +423,11 @@ def _torch_stages(w, cfg: dict, x, dtype: str, bf16_rope: bool):
 
 
 # --------------------------------------------------------------------------
-# port stages (mlx), calling the real mlx_nanbeige modules
+# port stages (mlx), calling the real nanbeige_mlx modules
 # --------------------------------------------------------------------------
 
 def _mlx_stages(w, cfg: dict, x: mx.array, dtype: str, bf16_rope: bool):
-    from mlx_nanbeige.model import ModelArgs, TransformerBlock
+    from nanbeige_mlx.model import ModelArgs, TransformerBlock
 
     args = ModelArgs.from_dict(cfg)
     blk = TransformerBlock(args)
@@ -455,7 +455,7 @@ def _mlx_stages(w, cfg: dict, x: mx.array, dtype: str, bf16_rope: bool):
         qr, kr = a.rope(q), a.rope(k)
     s["rope_q"], s["rope_k"] = qr, kr
 
-    from mlx_nanbeige.model import scaled_dot_product_attention
+    from nanbeige_mlx.model import scaled_dot_product_attention
     ao = scaled_dot_product_attention(qr, kr, v, cache=None, scale=a.scale, mask="causal")
     s["attn_out"] = ao.transpose(0, 2, 1, 3).reshape(B, L, -1)
     s["o_proj"] = op = a.o_proj(s["attn_out"])

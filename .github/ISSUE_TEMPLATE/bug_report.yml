@@ -63,7 +63,7 @@ body:
     id: output
     attributes:
       label: Output / error
-      description: "Full output, including the traceback. For conversion failures, the complete `mlx-nanbeige-convert` log."
+      description: "Full output, including the traceback. For conversion failures, the complete `nanbeige-mlx-convert` log."
       render: shell
     validations:
       required: true

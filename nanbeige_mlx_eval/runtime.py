@@ -204,7 +204,7 @@ def _env_info() -> dict[str, Any]:
         "machine": platform.machine(),
         "mlx": mlx_version,
         "mlx_lm": _pkg_version("mlx-lm"),
-        "mlx_nanbeige": _pkg_version("mlx-nanbeige"),
+        "nanbeige_mlx": _pkg_version("nanbeige-mlx"),
         "transformers": _pkg_version("transformers"),
         "git_commit": _git_sha(),
     }

@@ -34,7 +34,7 @@ def test_env_info_has_real_mlx_version():
         assert env["mlx"] == "unavailable", f"mlx absent but env says {env['mlx']!r}"
     # mlx-lm and transformers presence is recorded (they may be 'absent' on a
     # stripped CI image, but the key must exist).
-    for key in ("mlx_lm", "mlx_nanbeige", "transformers"):
+    for key in ("mlx_lm", "nanbeige_mlx", "transformers"):
         assert key in env
     assert "git_commit" in env
 

@@ -27,7 +27,7 @@ under `tests/` (`test_grading`, `test_manifest`, `test_mock_runtime`,
 | area | path | needs model? |
 |---|---|---|
 | eval harness | `nanbeige_mlx_eval/` | no (mock) / yes (real run) |
-| the MLX port | `mlx_nanbeige/mlx_nanbeige/` | yes (to exercise) |
+| the MLX port | `nanbeige_mlx/nanbeige_mlx/` | yes (to exercise) |
 | suites | `suites/` (`agentic_en`, `agentic_zh`, `smoke`) | no (schema) |
 | graders | `nanbeige_mlx_eval/grading.py` | no |
 | fidelity tooling | `nanbeige_mlx_eval/{parity,trace,bisect,crosscheck}.py` | yes (HF reference) |
@@ -36,7 +36,7 @@ under `tests/` (`test_grading`, `test_manifest`, `test_mock_runtime`,
 ## Before you open a PR
 
 1. **Tests pass.** `.venv/bin/pytest -q` must be green. If you touch the port,
-   also run `mlx_nanbeige/tests/test_cache_consistency.py` (needs MLX).
+   also run `nanbeige_mlx/tests/test_cache_consistency.py` (needs MLX).
 2. **Suites validate.** `nanbeige-mlx-eval validate-suite suites/<your>.json`
    against the schema in `nanbeige_mlx_eval/suite.py`.
 3. **Numbers stay checkable.** If you cite a measurement in a README or model
@@ -60,7 +60,7 @@ The most useful bug reports include:
 
 - `nanbeige-mlx-eval` version and `mlx.core.__version__`
 - the exact command and its output
-- for conversion failures, the full `mlx-nanbeige-convert` log
+- for conversion failures, the full `nanbeige-mlx-convert` log
 
 ## Honesty about results
 

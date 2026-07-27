@@ -34,7 +34,7 @@ from typing import Any
 
 import mlx.core as mx
 
-from mlx_nanbeige.model import Model, ModelArgs
+from nanbeige_mlx.model import Model, ModelArgs
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -102,7 +102,7 @@ def _gather_mlx_layer_states(
     Mirrors ``NanbeigeModel.__call__`` exactly (norm at each loop boundary) but
     records ``h`` after each block instead of returning only the final output.
     """
-    from mlx_nanbeige.model import (  # noqa: F811 (re-import for standalone use)
+    from nanbeige_mlx.model import (  # noqa: F811 (re-import for standalone use)
         create_attention_mask,
     )
 

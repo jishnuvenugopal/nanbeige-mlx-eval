@@ -27,7 +27,7 @@ from typing import Any
 
 import mlx.core as mx
 
-from mlx_nanbeige.model import Model, ModelArgs
+from nanbeige_mlx.model import Model, ModelArgs
 
 
 # Diverse probes: English, Chinese, code, and a tool-call prompt. Short prompts

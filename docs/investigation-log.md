@@ -347,7 +347,7 @@ dir, or symlink weights and write config to the copy.
 
 **C4. `nanbeige-mlx-eval convert` never calls `prepare_source`.** `cmd_convert` goes
 straight to `to_mlx`, which requires `model_file` already in the config — so the exact
-command in the README fails on a fresh download. (`python -m mlx_nanbeige.convert`
+command in the README fails on a fresh download. (`python -m nanbeige_mlx.convert`
 does it right; the eval CLI doesn't.)
 
 **C5. Converted repos lose tokenizer files.** Output `tokenizer_config.json` is 492
@@ -391,9 +391,9 @@ mention *"the sibling `ornith-mlx-eval` project"*, and `cli.py`'s docstring is t
 `argparse` description — so it prints on `--help`.
 
 **C10. `model.py` exists in five places, byte-identical but for one docstring line**
-(`mlx_nanbeige/model.py`, `nanbeige_mlx_eval/models/nanbeige.py`, and one copy inside
+(`nanbeige_mlx/model.py`, `nanbeige_mlx_eval/models/nanbeige.py`, and one copy inside
 each of the three quant dirs). Pick one home; have the eval project depend on
-`mlx-nanbeige` and import from it. Divergence here is a silent-wrong-results bug.
+`nanbeige-mlx` and import from it. Divergence here is a silent-wrong-results bug.
 
 **C11. `benchmark_results/` is gitignored, but the README publishes numbers from it.**
 Commit the artifacts you cite, or the reader can't check them. (I could only check
@@ -410,7 +410,7 @@ them because you have them locally.)
   §4 applies: include the upstream LICENSE, retain notices, and state that you changed
   the files.
 - **You cannot relicense the weights MIT.** MIT covers your code. A bundle labelled
-  "MIT" would be a false license claim. Keep them separate: MIT for `mlx_nanbeige/`,
+  "MIT" would be a false license claim. Keep them separate: MIT for `nanbeige_mlx/`,
   Apache-2.0 on the weights repo. Your current READMEs already draw this line
   correctly — don't blur it by merging the artifacts.
 
@@ -428,7 +428,7 @@ and `pip` would re-download the whole thing on every version bump.
 Publish each quant as its own HF repo. You already wrote `upload.py`:
 
 ```bash
-python -m mlx_nanbeige.upload --model-dir models/nanbeige-mlx-4bit \
+python -m nanbeige_mlx.upload --model-dir models/nanbeige-mlx-4bit \
   --repo-id jishnuvenugopal/Nanbeige4.2-3B-mlx-4bit
 ```
 
@@ -442,7 +442,7 @@ model, tok = mlx_lm.load("jishnuvenugopal/Nanbeige4.2-3B-mlx-4bit")
 Weights arrive on first use, cached in `~/.cache/huggingface`, resumable,
 revision-pinnable. From the user's side that's indistinguishable from bundling — and
 it's exactly how `mlx-community` ships every model. If you want it to feel more
-first-class, add a thin `mlx_nanbeige.pull("4bit")` that wraps `snapshot_download`
+first-class, add a thin `nanbeige_mlx.pull("4bit")` that wraps `snapshot_download`
 with the repo ids baked in, and put `--kv-bits` guidance in the model card.
 
 Fix C7 (license frontmatter + NOTICE) before you push any weights repo.
@@ -456,21 +456,21 @@ Fix C7 (license frontmatter + NOTICE) before you push any weights repo.
 Almost everything below depends on this, so do it before writing any code. Right now
 `model.py` lives in five places and both repos own conversion. Split it:
 
-| | `mlx-nanbeige` (the port) | `nanbeige-mlx-eval` (the study) |
+| | `nanbeige-mlx` (the port) | `nanbeige-mlx-eval` (the study) |
 |---|---|---|
 | owns | `model.py`, `convert.py`, `upload.py`, `pull.py` | suites, grading, runtime, reporting, parity, CLI |
 | publishes to | PyPI + HF weight repos | GitHub only |
-| depends on | mlx, mlx-lm, huggingface_hub | **mlx-nanbeige**, transformers, jsonschema |
+| depends on | mlx, mlx-lm, huggingface_hub | **nanbeige-mlx**, transformers, jsonschema |
 | audience | anyone running Nanbeige on a Mac | readers of your writeup |
 
 Concretely:
 
-1. `mlx-nanbeige` keeps `mlx_nanbeige/model.py` as the single source of truth.
+1. `nanbeige-mlx` keeps `nanbeige_mlx/model.py` as the single source of truth.
 2. Delete `nanbeige_mlx_eval/models/nanbeige.py` and `nanbeige_mlx_eval/convert.py`.
-3. Add `mlx-nanbeige>=0.2.0` to the eval's `dependencies`; replace
+3. Add `nanbeige-mlx>=0.2.0` to the eval's `dependencies`; replace
    `from .models.nanbeige import Model, ModelArgs` with
-   `from mlx_nanbeige.model import Model, ModelArgs`, and `cmd_convert` with a
-   passthrough to `mlx_nanbeige.convert.to_mlx` (which will call `prepare_source`
+   `from nanbeige_mlx.model import Model, ModelArgs`, and `cmd_convert` with a
+   passthrough to `nanbeige_mlx.convert.to_mlx` (which will call `prepare_source`
    itself after P3.3).
 4. Keep the three copies inside `models/nanbeige-mlx-*bit/` — those are *supposed* to
    be there, they're the shipped `model_file`. They're generated, not source.
@@ -625,7 +625,7 @@ you'd debug the *next* architecture you port, so it earns its keep.
 **P2.4 — Prefill-vs-decode self-consistency** (fixes **A2**, the important half)
 
 This one needs no torch, runs in seconds, and is the test the 44-slot cache actually
-demands. Put it in **`mlx-nanbeige`** as `tests/test_cache_consistency.py`, since it
+demands. Put it in **`nanbeige-mlx`** as `tests/test_cache_consistency.py`, since it
 tests the port not the study:
 
 ```python
@@ -654,7 +654,7 @@ Add a second one: `test_cache_offset_matches_across_loops` — after a forward, 
 
 ---
 
-### Phase 3 — Harden the port before you publish weights (½ day, `mlx-nanbeige`)
+### Phase 3 — Harden the port before you publish weights (½ day, `nanbeige-mlx`)
 
 Sequencing matters here: `model.py` gets **frozen into every weight repo you push**.
 Fix it before uploading, not after.
@@ -695,7 +695,7 @@ try:
     from mlx_lm.models.cache import KVCache
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
-        "mlx_nanbeige requires mlx-lm >= 0.31 (tested 0.31.3); the internal "
+        "nanbeige_mlx requires mlx-lm >= 0.31 (tested 0.31.3); the internal "
         "helpers this model_file uses moved or were removed in your version."
     ) from exc
 ```
@@ -870,7 +870,7 @@ def _env_info():
         "machine": platform.machine(),
         "mlx": mx.__version__,                    # not mlx.__version__
         "mlx_lm": v("mlx-lm"),
-        "mlx_nanbeige": v("mlx-nanbeige"),
+        "nanbeige_mlx": v("nanbeige-mlx"),
         "transformers": v("transformers"),
         "git_commit": _git_sha(),
     }
@@ -883,7 +883,7 @@ can't silently rot again.
 
 ---
 
-### Phase 5 — Publish (½ day, `mlx-nanbeige`)
+### Phase 5 — Publish (½ day, `nanbeige-mlx`)
 
 Gate: Phases 2 and 3 green. Do not push weights containing a `model.py` you're still
 editing.
@@ -926,12 +926,12 @@ def pull(quant: str = "4bit", revision: str | None = None) -> str:
 So the README's headline becomes two lines with no conversion step:
 
 ```python
-from mlx_nanbeige import pull; import mlx_lm
+from nanbeige_mlx import pull; import mlx_lm
 model, tok = mlx_lm.load(pull("4bit"))
 ```
 
 **P5.3 — Publish order:** 4-bit first, load it from a clean venv on a different
-machine (or at least a fresh `HF_HOME`) with only `pip install mlx-nanbeige`, confirm
+machine (or at least a fresh `HF_HOME`) with only `pip install nanbeige-mlx`, confirm
 it generates, then push 6-bit and 8-bit. Tag `v0.2.0` and pin the revision SHAs in the
 eval's README so the study is reproducible against exact weights.
 
@@ -1850,7 +1850,7 @@ specific, named target.
 
 Once the buffer-cast mechanism (`.to(bf16)` clobbering the non-persistent fp32
 `inv_freq`, `rope_theta = 7e7`) became the prime suspect for the harness's
-object difference, the symmetric question was whether `mlx_nanbeige` carries the
+object difference, the symmetric question was whether `nanbeige_mlx` carries the
 same class of bug — MLX's `set_dtype` walks the whole tree the way PyTorch's
 `Module.to()` does. Checked by static inspection (code read + package-wide grep),
 no model load needed; the conclusion is by construction, not by run.
@@ -1859,19 +1859,19 @@ no model load needed; the conclusion is by construction, not by run.
 shipped port is not implicated.** Three reasons, each sufficient on its own:
 
 1. **No buffer to clobber.** The port uses plain `nn.RoPE`
-   (`mlx_nanbeige/mlx_nanbeige/model.py:95`, via `_make_rope`). MLX's `nn.RoPE`
+   (`nanbeige_mlx/nanbeige_mlx/model.py:95`, via `_make_rope`). MLX's `nn.RoPE`
    (`.venv/.../mlx/nn/layers/positional_encoding.py:30-41`) holds only four
    Python scalars — `dims`, `traditional`, `base`, `scale` — and no `mx.array`,
    parameter, or buffer. `__call__` (`:46-54`) delegates to `mx.fast.rope(...)`,
    which recomputes frequencies from `base = 7e7` inside the C++/Metal kernel on
    every forward. There is no `inv_freq` tensor for a cast to touch, so the
    surface the HF bug attaches to does not exist on the MLX side.
-2. **No cast exists.** A recursive grep over `mlx_nanbeige/mlx_nanbeige/` for
+2. **No cast exists.** A recursive grep over `nanbeige_mlx/nanbeige_mlx/` for
    `set_dtype`, `.astype`, `.to(`, `bfloat16` returns no matches — model or
    convert path. Quantization (`convert.py`) runs only on projection weights via
    `mlx_lm.convert`, never on RoPE state.
 3. **Defense-in-depth on load.** `Model.sanitize`
-   (`mlx_nanbeige/mlx_nanbeige/model.py:336-342`) drops any `rotary_emb.inv_freq`
+   (`nanbeige_mlx/nanbeige_mlx/model.py:336-342`) drops any `rotary_emb.inv_freq`
    keys from a checkpoint before load, so even a hypothetical buffer shipped in a
    weight file cannot survive into the model tree.
 

@@ -2,7 +2,7 @@
 
 ``list-suites`` / ``validate-suite`` for harness readiness, ``run`` for
 execution, ``report`` / ``compare`` / ``regrade`` for idempotent
-artifact-driven reporting, plus ``convert`` (passthrough to ``mlx_nanbeige``)
+artifact-driven reporting, plus ``convert`` (passthrough to ``nanbeige_mlx``)
 and ``parity`` (the MLX-vs-HF fidelity gate, Half A).
 """
 
@@ -19,7 +19,7 @@ from .report import write_report
 from .runtime import MLXRuntime, MockRuntime, run_suite
 from .suite import SuiteError, builtin_suites_dir, list_builtin_suites, load_suite
 
-# `to_mlx` (mlx_nanbeige.convert) and `run_parity` (.parity) pull in mlx / mlx_lm
+# `to_mlx` (nanbeige_mlx.convert) and `run_parity` (.parity) pull in mlx / mlx_lm
 # at module top level. Importing them here would make every subcommand --
 # including the model-free ones (list-suites, validate-suite, report, compare,
 # run --runtime mock) -- require mlx, which has no linux x86_64 wheel and so
@@ -158,7 +158,7 @@ def cmd_bisect(args):
 
 
 def cmd_convert(args):
-    from mlx_nanbeige.convert import to_mlx
+    from nanbeige_mlx.convert import to_mlx
 
     out = to_mlx(args.src, args.out, args.bits, args.group_size)
     print(out)

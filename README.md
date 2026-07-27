@@ -2,7 +2,7 @@
 
 A **bilingual (EN/ZH) agentic-readiness evaluation** and **fidelity gate** for
 the Nanbeige4.2-3B *Looped Transformer*, running entirely on Apple Silicon. The
-MLX port itself lives in the sibling [`mlx-nanbeige`](https://github.com/jishnuvenugopal/mlx-nanbeige) package
+MLX port itself lives in the sibling [`nanbeige-mlx`](https://github.com/jishnuvenugopal/nanbeige-mlx) package
 (this repo depends on it); this package owns the suites, graders, runtime,
 parity/trace tooling, and reporting. This is an independent project; it is not
 affiliated with or endorsed by the Nanbeige team.
@@ -33,7 +33,7 @@ This is a **harness + honest small-N eval**, not a leaderboard. Pass rates carry
   **runs on a 16 GB M1 Pro**.
 - ✅ The 44-slot loop-aware cache is **verified by prefill-vs-incremental-decode
   equality** (all virtual slots stay in lockstep; see
-  `mlx_nanbeige/tests/test_cache_consistency.py`).
+  `nanbeige_mlx/tests/test_cache_consistency.py`).
 - ✅ **Tool selection and argument extraction hold at ~90 % (EN) and ~90 % (ZH)
   from 4-bit up** on the widened 30-case suite — flat across quants, with the
   ~3 failures-per-config consistent across quants (a 3B model property, not a
@@ -98,7 +98,7 @@ is why several quantisations appeared quickly.
 119 model implementations. `mlx_lm.convert` on the 4.2 checkpoint fails outright.
 Getting it into MLX requires implementing the weight-shared loop, the 44-slot
 loop-aware KV cache, and the non-square projections — which is what
-[`mlx-nanbeige`](https://github.com/jishnuvenugopal/mlx-nanbeige) does, and what
+[`nanbeige-mlx`](https://github.com/jishnuvenugopal/nanbeige-mlx) does, and what
 this harness then tries to prove correct.
 
 (mlx-lm does ship `iquestloopcoder.py`, a different looped architecture, so the
@@ -123,7 +123,7 @@ surfaces more open questions; that is the trade, and it is the right one.
 
 ---
 
-## The port (`mlx-nanbeige`)
+## The port (`nanbeige-mlx`)
 
 The effective architecture of this checkpoint is a clean, portable design (the
 published config's experimental features — n-gram, hyper-connection, depth
@@ -142,14 +142,14 @@ attention, double-loop — are all disabled):
     `make_cache` hook so standard `mlx_lm.generate` works unchanged.
 
 The port lives in its own repository,
-[`jishnuvenugopal/mlx-nanbeige`](https://github.com/jishnuvenugopal/mlx-nanbeige)
-(`mlx_nanbeige/model.py`), and is also copied verbatim into each converted weight
+[`jishnuvenugopal/nanbeige-mlx`](https://github.com/jishnuvenugopal/nanbeige-mlx)
+(`nanbeige_mlx/model.py`), and is also copied verbatim into each converted weight
 repo as a `model_file`, so the quants load with no mlx-lm registry entry. This
 harness declares it as a dependency. Convert and publish with it:
 
 ```bash
-mlx-nanbeige-convert --src models/nanbeige42-hf --out models/nanbeige-mlx-4bit --bits 4
-mlx-nanbeige-upload --model-dir models/nanbeige-mlx-4bit \
+nanbeige-mlx-convert --src models/nanbeige42-hf --out models/nanbeige-mlx-4bit --bits 4
+nanbeige-mlx-upload --model-dir models/nanbeige-mlx-4bit \
   --repo-id <user>/Nanbeige4.2-3B-mlx-4bit --dry-run   # renders card, no push
 ```
 
@@ -492,7 +492,7 @@ persisted run — useful when the grader changes (it did for this report).
 
 - macOS on Apple Silicon
 - Python ≥ 3.10
-- `mlx-nanbeige` (the port), `mlx`, `mlx-lm`, `transformers`, `jsonschema`
+- `nanbeige-mlx` (the port), `mlx`, `mlx-lm`, `transformers`, `jsonschema`
 - dev: `pytest`
 
 ## Setup
@@ -500,7 +500,7 @@ persisted run — useful when the grader changes (it did for this report).
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install "mlx-nanbeige @ git+https://github.com/jishnuvenugopal/mlx-nanbeige@main"   # the port (until it's on PyPI)
+.venv/bin/pip install "nanbeige-mlx @ git+https://github.com/jishnuvenugopal/nanbeige-mlx@main"   # the port (until it's on PyPI)
 .venv/bin/pip install -e '.[dev]'                # this eval harness
 .venv/bin/pytest -q          # harness-readiness gate (mock runtime, suite validation — no model download)
 .venv/bin/nanbeige-mlx-eval --help
@@ -515,7 +515,7 @@ nanbeige-mlx-eval validate-suite suites/agentic_en.json
 nanbeige-mlx-eval run --suite smoke --runtime mock --output-root benchmark_results
 
 # convert the checkpoint to MLX quants (one-off; needs the HF weights locally)
-mlx-nanbeige-convert --src models/nanbeige42-hf --out models/nanbeige-mlx-4bit --bits 4
+nanbeige-mlx-convert --src models/nanbeige42-hf --out models/nanbeige-mlx-4bit --bits 4
 
 # fidelity (Half A) — needs transformers + the HF reference
 nanbeige-mlx-eval parity --src models/nanbeige42-hf --out benchmark_results/parity.json --device cpu --dtype bf16
@@ -570,9 +570,9 @@ of them — only the code to convert and evaluate.
 
 ## License
 
-MIT for the code in `nanbeige_mlx_eval/` (and for `mlx-nanbeige`, in its own repo). The Nanbeige model
+MIT for the code in `nanbeige_mlx_eval/` (and for `nanbeige-mlx`, in its own repo). The Nanbeige model
 weights and chat template are governed by the upstream Apache-2.0 license;
 convert, evaluate, and redistribute them per that license. Published weight
-repos (via `mlx-nanbeige-upload`) carry the upstream Apache-2.0 LICENSE, a
+repos (via `nanbeige-mlx-upload`) carry the upstream Apache-2.0 LICENSE, a
 NOTICE stating the modification (quantization), and proper `base_model` /
 `license` frontmatter.

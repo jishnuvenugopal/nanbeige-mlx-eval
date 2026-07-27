@@ -66,7 +66,7 @@ thing it replaces, on real weights, at the full-model level.
 ## Phase 1 — write it
 
 **Location:** `nanbeige_ref/` in the eval repo. It is validation apparatus, not
-a runtime dependency of the port, so it does not belong in `mlx-nanbeige`.
+a runtime dependency of the port, so it does not belong in `nanbeige-mlx`.
 
 **Fidelity to upstream, not elegance.** Mirror the upstream's op *order* exactly
 where it is observable, even where a cleaner formulation exists. Specifically:
