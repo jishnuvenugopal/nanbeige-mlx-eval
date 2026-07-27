@@ -37,3 +37,7 @@ snapshots/
 RELEASE.md
 docs/_*.md
 HANDOFF.md
+
+# The MLX port lives in its own repo now: github.com/jishnuvenugopal/mlx-nanbeige
+# Installed as the mlx-nanbeige package; this subdir is a leftover local copy.
+mlx_nanbeige/
