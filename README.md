@@ -2,7 +2,7 @@
 
 A **bilingual (EN/ZH) agentic-readiness evaluation** and **fidelity gate** for
 the Nanbeige4.2-3B *Looped Transformer*, running entirely on Apple Silicon. The
-MLX port itself lives in the sibling [`mlx-nanbeige`](mlx_nanbeige/) package
+MLX port itself lives in the sibling [`mlx-nanbeige`](https://github.com/jishnuvenugopal/mlx-nanbeige) package
 (this repo depends on it); this package owns the suites, graders, runtime,
 parity/trace tooling, and reporting. This is an independent project; it is not
 affiliated with or endorsed by the Nanbeige team.
@@ -74,6 +74,55 @@ This is a **harness + honest small-N eval**, not a leaderboard. Pass rates carry
 
 ---
 
+## Why 4.2 needed a port when 4.1 didn't
+
+`mlx-community` publishes Nanbeige**4.1**-3B in 4-bit, 8-bit and bf16, and there
+are third-party copies besides. There is no 4.2. That gap is architectural, not
+a matter of nobody getting round to it.
+
+| | 4.1 (mlx-community) | 4.2 (this project) |
+|---|---|---|
+| `model_type` | **`llama`** | **`nanbeige`** |
+| `architectures` | `LlamaForCausalLM` | `NanbeigeForCausalLM` |
+| layers | 32 | 22 × `num_loops: 2` = **44 effective** |
+| hidden size | 2560 | 3072 |
+| heads Q / KV | 20 / 4 | 48 / 8 |
+| `head_dim` | 128 (= 2560/20, square) | 128 while hidden/heads = 64 (**non-square**) |
+| `trust_remote_code` | not needed | required |
+
+**4.1 is a plain Llama.** Its config declares `model_type: llama`, so
+`mlx_lm.convert` handles it with the stock path — no porting work at all, which
+is why several quantisations appeared quickly.
+
+**4.2 is a Looped Transformer**, and mlx-lm has no `nanbeige` entry among its
+119 model implementations. `mlx_lm.convert` on the 4.2 checkpoint fails outright.
+Getting it into MLX requires implementing the weight-shared loop, the 44-slot
+loop-aware KV cache, and the non-square projections — which is what
+[`mlx-nanbeige`](https://github.com/jishnuvenugopal/mlx-nanbeige) does, and what
+this harness then tries to prove correct.
+
+(mlx-lm does ship `iquestloopcoder.py`, a different looped architecture, so the
+concept isn't unprecedented there — but its config and layer structure don't
+line up with Nanbeige's `num_loops` / `skip_loop_final_norm` scheme, so it isn't
+adaptable without the same work.)
+
+**What this does and doesn't claim.** If you want a well-supported small model on
+a Mac today, 4.1 is the easier recommendation — being plain Llama, it works in
+LM Studio, Ollama and everything else without a `model_file`. This project exists
+because 4.2 is a different and more interesting architecture, and because a
+one-command stock conversion produces no evidence that it is correct. The
+durable output here is the validation apparatus and the
+[investigation log](docs/investigation-log.md), not the weights: if upstream or
+mlx-community publishes 4.2 tomorrow, the quants are redundant and the harness
+is not.
+
+One caveat worth stating plainly: this port carries a documented, unexplained
+end-to-end logit gap (below). A stock 4.1 conversion carries no such caveat —
+not because it is more faithful, but because nobody measured it. More scrutiny
+surfaces more open questions; that is the trade, and it is the right one.
+
+---
+
 ## The port (`mlx-nanbeige`)
 
 The effective architecture of this checkpoint is a clean, portable design (the
@@ -92,9 +141,11 @@ attention, double-loop — are all disabled):
     even though only 22 blocks of weights exist, exposed via mlx-lm's
     `make_cache` hook so standard `mlx_lm.generate` works unchanged.
 
-The port lives in [`mlx_nanbeige/mlx_nanbeige/model.py`](mlx_nanbeige/mlx_nanbeige/model.py)
-and is also shipped inside each converted weight repo as a `model_file`, so the
-quants load with no registry entry. Convert and publish with the sibling package:
+The port lives in its own repository,
+[`jishnuvenugopal/mlx-nanbeige`](https://github.com/jishnuvenugopal/mlx-nanbeige)
+(`mlx_nanbeige/model.py`), and is also copied verbatim into each converted weight
+repo as a `model_file`, so the quants load with no mlx-lm registry entry. This
+harness declares it as a dependency. Convert and publish with it:
 
 ```bash
 mlx-nanbeige-convert --src models/nanbeige42-hf --out models/nanbeige-mlx-4bit --bits 4
@@ -449,9 +500,9 @@ persisted run — useful when the grader changes (it did for this report).
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install -e './mlx_nanbeige[dev]'   # the port (single source of truth)
+.venv/bin/pip install "mlx-nanbeige @ git+https://github.com/jishnuvenugopal/mlx-nanbeige@main"   # the port (until it's on PyPI)
 .venv/bin/pip install -e '.[dev]'                # this eval harness
-.venv/bin/pytest -q          # harness-readiness gate (mock + cache-consistency, no model download)
+.venv/bin/pytest -q          # harness-readiness gate (mock runtime, suite validation — no model download)
 .venv/bin/nanbeige-mlx-eval --help
 ```
 
@@ -519,7 +570,7 @@ of them — only the code to convert and evaluate.
 
 ## License
 
-MIT for the code in `mlx_nanbeige/` and `nanbeige_mlx_eval/`. The Nanbeige model
+MIT for the code in `nanbeige_mlx_eval/` (and for `mlx-nanbeige`, in its own repo). The Nanbeige model
 weights and chat template are governed by the upstream Apache-2.0 license;
 convert, evaluate, and redistribute them per that license. Published weight
 repos (via `mlx-nanbeige-upload`) carry the upstream Apache-2.0 LICENSE, a
