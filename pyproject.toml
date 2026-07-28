@@ -28,7 +28,7 @@ classifiers = [
 # nanbeige-mlx owns the port (single source of truth); the eval depends on it.
 # jsonschema is a runtime dep: a grader that can't grade must never silently pass.
 dependencies = [
-    "nanbeige-mlx>=0.2.0,<0.3",
+    "nanbeige-mlx>=0.2.1,<0.3",
     "mlx>=0.32,<0.34",
     # Upper-bounded to match nanbeige-mlx: the port imports mlx-lm internals.
     # See the note in nanbeige_mlx/pyproject.toml.
