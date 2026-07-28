@@ -125,6 +125,31 @@ surfaces more open questions; that is the trade, and it is the right one.
 
 ## The port (`nanbeige-mlx`)
 
+Install the published port from PyPI:
+
+```bash
+pip install nanbeige-mlx
+```
+
+Then download and load any published quant through the standard `mlx-lm`
+interface:
+
+```python
+from nanbeige_mlx import pull
+import mlx_lm
+
+model, tok = mlx_lm.load(pull("4bit"))  # or "6bit" / "8bit"
+```
+
+The release artifacts used by this study are pinned below to their final,
+immutable Hub revisions:
+
+| quant | Hugging Face repository | revision SHA |
+|---|---|---|
+| 4-bit | [`jishnuvenugopal/Nanbeige4.2-3B-mlx-4bit`](https://huggingface.co/jishnuvenugopal/Nanbeige4.2-3B-mlx-4bit) | `d8a1c94b5162e7a1a0706475c714ce5b9603c8ca` |
+| 6-bit | [`jishnuvenugopal/Nanbeige4.2-3B-mlx-6bit`](https://huggingface.co/jishnuvenugopal/Nanbeige4.2-3B-mlx-6bit) | `876a2b0b7dce4b9a9bcbe1048b284be9f9bafd3d` |
+| 8-bit | [`jishnuvenugopal/Nanbeige4.2-3B-mlx-8bit`](https://huggingface.co/jishnuvenugopal/Nanbeige4.2-3B-mlx-8bit) | `2b796d6206a6c2a00a66d13e0d5806623502ae87` |
+
 The effective architecture of this checkpoint is a clean, portable design (the
 published config's experimental features — n-gram, hyper-connection, depth
 attention, double-loop — are all disabled):
@@ -500,7 +525,7 @@ persisted run — useful when the grader changes (it did for this report).
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install "nanbeige-mlx @ git+https://github.com/jishnuvenugopal/nanbeige-mlx@main"   # the port (until it's on PyPI)
+.venv/bin/pip install nanbeige-mlx
 .venv/bin/pip install -e '.[dev]'                # this eval harness
 .venv/bin/pytest -q          # harness-readiness gate (mock runtime, suite validation — no model download)
 .venv/bin/nanbeige-mlx-eval --help
